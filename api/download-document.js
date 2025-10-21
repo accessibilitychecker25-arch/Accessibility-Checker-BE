@@ -49,13 +49,10 @@ module.exports = async (req, res) => {
       try {
         const remediatedFile = await remediateDocx(fileData, filename);
         
-        // Suggest better filename
-        let suggestedName = filename;
-        if (filename.includes('_') || filename.toLowerCase().startsWith('document') || filename.toLowerCase().startsWith('untitled')) {
-          suggestedName = filename.replace(/_/g, '-').replace(/\.docx$/i, '-remediated.docx');
-        } else {
-          suggestedName = filename.replace(/\.docx$/i, '-remediated.docx');
-        }
+        // Always fix filename: replace underscores with hyphens and add -remediated suffix
+        let suggestedName = filename
+          .replace(/_/g, '-')  // Replace all underscores with hyphens
+          .replace(/\.docx$/i, '-remediated.docx');  // Add -remediated before extension
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         res.setHeader('Content-Disposition', `attachment; filename="${suggestedName}"`);
@@ -174,21 +171,23 @@ function fixHeadings(documentXml) {
       }
     }
     
-    // Fix 2: Add comment about heading order issues
+    // Fix 2: Automatically fix heading order by adjusting levels
+    let correctedLevel = level;
     if (level > previousHeadingLevel + 1 && previousHeadingLevel > 0) {
-      // Heading skips levels - add a warning comment in the text
-      const warningText = `[WARNING: Heading ${level} follows Heading ${previousHeadingLevel} - Consider adding Heading ${previousHeadingLevel + 1}] `;
+      // Heading skips levels - automatically correct to proper level
+      correctedLevel = previousHeadingLevel + 1;
       
-      // Insert warning at the beginning of the first text element
+      // Replace the heading style with the corrected level
       const fixedContent = content.replace(
-        /(<w:t[^>]*>)(.*?)(<\/w:t>)/,
-        `$1${warningText}$2$3`
+        /<w:pStyle w:val="Heading\d+"\/>/,
+        `<w:pStyle w:val="Heading${correctedLevel}"/>`
       );
-      previousHeadingLevel = level;
+      
+      previousHeadingLevel = correctedLevel;
       return `<w:p>${fixedContent}</w:p>`;
     }
     
-    previousHeadingLevel = level;
+    previousHeadingLevel = correctedLevel;
     return match;
   });
   
