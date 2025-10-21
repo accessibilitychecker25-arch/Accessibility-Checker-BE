@@ -135,8 +135,24 @@ function fixHeadings(documentXml) {
       return match; // Not a heading, leave it unchanged
     }
     
-    const level = parseInt(headingMatch[1]);
+    let level = parseInt(headingMatch[1]);
     headingCount++;
+    
+    // Fix heading order FIRST before processing text
+    let correctedLevel = level;
+    if (level > previousHeadingLevel + 1 && previousHeadingLevel > 0) {
+      // Heading skips levels - automatically correct to proper level
+      correctedLevel = previousHeadingLevel + 1;
+      
+      // Replace the heading style with the corrected level
+      content = content.replace(
+        /<w:pStyle w:val="Heading\d+"\/>/,
+        `<w:pStyle w:val="Heading${correctedLevel}"/>`
+      );
+      
+      // Update level to use corrected level for rest of processing
+      level = correctedLevel;
+    }
     
     // Extract text content
     const textMatches = content.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
@@ -150,7 +166,7 @@ function fixHeadings(documentXml) {
       hasText = text.length > 0;
     }
     
-    // Fix 1: Add placeholder text to empty headings
+    // Fix empty headings (using corrected level)
     if (!hasText) {
       // Check if there's a run element to add text to
       if (content.includes('<w:r>')) {
@@ -159,6 +175,7 @@ function fixHeadings(documentXml) {
           /(<w:r>(?:(?!<w:t>).)*?)(<\/w:r>)/,
           `$1<w:t>[Empty Heading ${level} - Please add text]</w:t>$2`
         );
+        previousHeadingLevel = level;
         return `<w:p>${fixedContent}</w:p>`;
       } else {
         // Create a new run with text
@@ -167,28 +184,13 @@ function fixHeadings(documentXml) {
           /(<w:pPr>[\s\S]*?<\/w:pPr>)/,
           `$1${newRun}`
         );
+        previousHeadingLevel = level;
         return `<w:p>${fixedContent}</w:p>`;
       }
     }
     
-    // Fix 2: Automatically fix heading order by adjusting levels
-    let correctedLevel = level;
-    if (level > previousHeadingLevel + 1 && previousHeadingLevel > 0) {
-      // Heading skips levels - automatically correct to proper level
-      correctedLevel = previousHeadingLevel + 1;
-      
-      // Replace the heading style with the corrected level
-      const fixedContent = content.replace(
-        /<w:pStyle w:val="Heading\d+"\/>/,
-        `<w:pStyle w:val="Heading${correctedLevel}"/>`
-      );
-      
-      previousHeadingLevel = correctedLevel;
-      return `<w:p>${fixedContent}</w:p>`;
-    }
-    
-    previousHeadingLevel = correctedLevel;
-    return match;
+    previousHeadingLevel = level;
+    return `<w:p>${content}</w:p>`;
   });
   
   return fixedXml;
