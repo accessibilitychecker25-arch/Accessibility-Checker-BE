@@ -75,7 +75,7 @@ app.use(
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.post('/upload-pdf', upload.single('file'), async (req, res) => {
+app.post('/upload-document', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded');
 
   let readStream;
