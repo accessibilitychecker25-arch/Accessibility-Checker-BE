@@ -105,6 +105,14 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
+    // Fix 3: Fix empty headings and heading order issues
+    const documentXmlFile = zip.file('word/document.xml');
+    if (documentXmlFile) {
+      let documentXml = await documentXmlFile.async('string');
+      documentXml = fixHeadings(documentXml);
+      zip.file('word/document.xml', documentXml);
+    }
+    
     // Generate the remediated DOCX file
     const remediatedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     return remediatedBuffer;
@@ -112,4 +120,77 @@ async function remediateDocx(fileData, filename) {
   } catch (error) {
     throw new Error(`Failed to remediate document: ${error.message}`);
   }
+}
+
+function fixHeadings(documentXml) {
+  // Find all paragraphs
+  const paragraphRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  
+  let fixedXml = documentXml;
+  let previousHeadingLevel = 0;
+  let headingCount = 0;
+  
+  fixedXml = fixedXml.replace(paragraphRegex, (match, content) => {
+    // Check if this paragraph has a heading style
+    const headingMatch = content.match(/<w:pStyle w:val="Heading(\d+)"\/>/);
+    
+    if (!headingMatch) {
+      return match; // Not a heading, leave it unchanged
+    }
+    
+    const level = parseInt(headingMatch[1]);
+    headingCount++;
+    
+    // Extract text content
+    const textMatches = content.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
+    let hasText = false;
+    
+    if (textMatches) {
+      const text = textMatches
+        .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
+        .join('')
+        .trim();
+      hasText = text.length > 0;
+    }
+    
+    // Fix 1: Add placeholder text to empty headings
+    if (!hasText) {
+      // Check if there's a run element to add text to
+      if (content.includes('<w:r>')) {
+        // Add text element to existing run
+        const fixedContent = content.replace(
+          /(<w:r>(?:(?!<w:t>).)*?)(<\/w:r>)/,
+          `$1<w:t>[Empty Heading ${level} - Please add text]</w:t>$2`
+        );
+        return `<w:p>${fixedContent}</w:p>`;
+      } else {
+        // Create a new run with text
+        const newRun = '<w:r><w:t>[Empty Heading ' + level + ' - Please add text]</w:t></w:r>';
+        const fixedContent = content.replace(
+          /(<w:pPr>[\s\S]*?<\/w:pPr>)/,
+          `$1${newRun}`
+        );
+        return `<w:p>${fixedContent}</w:p>`;
+      }
+    }
+    
+    // Fix 2: Add comment about heading order issues
+    if (level > previousHeadingLevel + 1 && previousHeadingLevel > 0) {
+      // Heading skips levels - add a warning comment in the text
+      const warningText = `[WARNING: Heading ${level} follows Heading ${previousHeadingLevel} - Consider adding Heading ${previousHeadingLevel + 1}] `;
+      
+      // Insert warning at the beginning of the first text element
+      const fixedContent = content.replace(
+        /(<w:t[^>]*>)(.*?)(<\/w:t>)/,
+        `$1${warningText}$2$3`
+      );
+      previousHeadingLevel = level;
+      return `<w:p>${fixedContent}</w:p>`;
+    }
+    
+    previousHeadingLevel = level;
+    return match;
+  });
+  
+  return fixedXml;
 }
