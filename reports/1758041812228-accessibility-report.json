@@ -1,0 +1,187 @@
+{
+    "Summary": {
+        "Description": "The checker found no problems in this document.",
+        "Needs manual check": 2,
+        "Passed manually": 0,
+        "Failed manually": 0,
+        "Skipped": 0,
+        "Passed": 30,
+        "Failed": 0
+    },
+    "Detailed Report": {
+        "Document": [
+            {
+                "Rule": "Accessibility permission flag",
+                "Status": "Passed",
+                "Description": "Accessibility permission flag must be set"
+            },
+            {
+                "Rule": "Image-only PDF",
+                "Status": "Passed",
+                "Description": "Document is not image-only PDF"
+            },
+            {
+                "Rule": "Tagged PDF",
+                "Status": "Passed",
+                "Description": "Document is tagged PDF"
+            },
+            {
+                "Rule": "Logical Reading Order",
+                "Status": "Needs manual check",
+                "Description": "Document structure provides a logical reading order"
+            },
+            {
+                "Rule": "Primary language",
+                "Status": "Passed",
+                "Description": "Text language is specified"
+            },
+            {
+                "Rule": "Title",
+                "Status": "Passed",
+                "Description": "Document title is showing in title bar"
+            },
+            {
+                "Rule": "Bookmarks",
+                "Status": "Passed",
+                "Description": "Bookmarks are present in large documents"
+            },
+            {
+                "Rule": "Color contrast",
+                "Status": "Needs manual check",
+                "Description": "Document has appropriate color contrast"
+            }
+        ],
+        "Page Content": [
+            {
+                "Rule": "Tagged content",
+                "Status": "Passed",
+                "Description": "All page content is tagged"
+            },
+            {
+                "Rule": "Tagged annotations",
+                "Status": "Passed",
+                "Description": "All annotations are tagged"
+            },
+            {
+                "Rule": "Tab order",
+                "Status": "Passed",
+                "Description": "Tab order is consistent with structure order"
+            },
+            {
+                "Rule": "Character encoding",
+                "Status": "Passed",
+                "Description": "Reliable character encoding is provided"
+            },
+            {
+                "Rule": "Tagged multimedia",
+                "Status": "Passed",
+                "Description": "All multimedia objects are tagged"
+            },
+            {
+                "Rule": "Screen flicker",
+                "Status": "Passed",
+                "Description": "Page will not cause screen flicker"
+            },
+            {
+                "Rule": "Scripts",
+                "Status": "Passed",
+                "Description": "No inaccessible scripts"
+            },
+            {
+                "Rule": "Timed responses",
+                "Status": "Passed",
+                "Description": "Page does not require timed responses"
+            },
+            {
+                "Rule": "Navigation links",
+                "Status": "Passed",
+                "Description": "Navigation links are not repetitive"
+            }
+        ],
+        "Forms": [
+            {
+                "Rule": "Tagged form fields",
+                "Status": "Passed",
+                "Description": "All form fields are tagged"
+            },
+            {
+                "Rule": "Field descriptions",
+                "Status": "Passed",
+                "Description": "All form fields have description"
+            }
+        ],
+        "Alternate Text": [
+            {
+                "Rule": "Figures alternate text",
+                "Status": "Passed",
+                "Description": "Figures require alternate text"
+            },
+            {
+                "Rule": "Nested alternate text",
+                "Status": "Passed",
+                "Description": "Alternate text that will never be read"
+            },
+            {
+                "Rule": "Associated with content",
+                "Status": "Passed",
+                "Description": "Alternate text must be associated with some content"
+            },
+            {
+                "Rule": "Hides annotation",
+                "Status": "Passed",
+                "Description": "Alternate text should not hide annotation"
+            },
+            {
+                "Rule": "Other elements alternate text",
+                "Status": "Passed",
+                "Description": "Other elements that require alternate text"
+            }
+        ],
+        "Tables": [
+            {
+                "Rule": "Rows",
+                "Status": "Passed",
+                "Description": "TR must be a child of Table, THead, TBody, or TFoot"
+            },
+            {
+                "Rule": "TH and TD",
+                "Status": "Passed",
+                "Description": "TH and TD must be children of TR"
+            },
+            {
+                "Rule": "Headers",
+                "Status": "Passed",
+                "Description": "Tables should have headers"
+            },
+            {
+                "Rule": "Regularity",
+                "Status": "Passed",
+                "Description": "Tables must contain the same number of columns in each row and rows in each column"
+            },
+            {
+                "Rule": "Summary",
+                "Status": "Passed",
+                "Description": "Tables must have a summary"
+            }
+        ],
+        "Lists": [
+            {
+                "Rule": "List items",
+                "Status": "Passed",
+                "Description": "LI must be a child of L"
+            },
+            {
+                "Rule": "Lbl and LBody",
+                "Status": "Passed",
+                "Description": "Lbl and LBody must be children of LI"
+            }
+        ],
+        "Headings": [
+            {
+                "Rule": "Appropriate nesting",
+                "Status": "Passed",
+                "Description": "Appropriate nesting"
+            }
+        ]
+    }
+}
