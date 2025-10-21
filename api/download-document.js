@@ -75,14 +75,24 @@ async function remediateDocx(fileData, filename) {
   try {
     const zip = await JSZip.loadAsync(fileData);
     
-    // Fix 1: Set title if missing
+    // Create a clean title from the filename (remove extension, replace special chars)
+    const cleanTitle = filename
+      .replace(/\.docx$/i, '')  // Remove extension
+      .replace(/_/g, ' ')        // Replace underscores with spaces
+      .replace(/-/g, ' ')        // Replace hyphens with spaces
+      .replace(/\s+/g, ' ')      // Normalize multiple spaces
+      .trim();
+    
+    // Fix 1: Set title based on filename
     const coreXmlFile = zip.file('docProps/core.xml');
     if (coreXmlFile) {
       let coreXml = await coreXmlFile.async('string');
-      if (coreXml.includes('<dc:title></dc:title>') || coreXml.includes('<dc:title/>')) {
-        coreXml = coreXml.replace(/<dc:title><\/dc:title>|<dc:title\/>/, '<dc:title>Needs Title</dc:title>');
-        zip.file('docProps/core.xml', coreXml);
-      }
+      // Always update title to match the clean filename
+      coreXml = coreXml.replace(
+        /<dc:title>.*?<\/dc:title>|<dc:title\/>/,
+        `<dc:title>${cleanTitle}</dc:title>`
+      );
+      zip.file('docProps/core.xml', coreXml);
     }
     
     // Fix 2: Set default language to en-US in styles
@@ -141,9 +151,11 @@ function fixHeadings(documentXml) {
     
     // Fix heading order FIRST before processing text
     let correctedLevel = level;
+    let wasCorrect = false;
     if (level > previousHeadingLevel + 1 && previousHeadingLevel > 0) {
       // Heading skips levels - automatically correct to proper level
       correctedLevel = previousHeadingLevel + 1;
+      wasCorrect = true;
       
       // Replace the heading style with the corrected level
       content = content.replace(
@@ -165,6 +177,14 @@ function fixHeadings(documentXml) {
         .join('')
         .trim();
       hasText = text.length > 0;
+    }
+    
+    // If we corrected the level, update the text to reflect it
+    if (wasCorrect && hasText) {
+      content = content.replace(
+        /(<w:t[^>]*>)(.*?)(<\/w:t>)/,
+        `$1[Corrected to H${level}] $2$3`
+      );
     }
     
     // Fix empty headings (using corrected level)
