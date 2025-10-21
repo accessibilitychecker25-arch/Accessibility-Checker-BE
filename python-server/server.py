@@ -589,3 +589,6 @@ async def download_document(file: UploadFile = File(...)):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{suggested_file_name}"'}
     )
+
+# Vercel serverless handler
+handler = app
