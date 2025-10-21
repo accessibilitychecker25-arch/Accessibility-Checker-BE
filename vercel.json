@@ -1,8 +1,13 @@
 {
-  "rewrites": [
+  "functions": {
+    "docx-converter.js": {
+      "runtime": "@vercel/node@18"
+    }
+  },
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "/autotag-pdf.js"
+      "src": "/(.*)",
+      "dest": "/docx-converter.js"
     }
   ]
 }
