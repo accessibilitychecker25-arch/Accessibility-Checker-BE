@@ -1,13 +1,8 @@
 {
-  "functions": {
-    "autotag-pdf.js": {
-      "runtime": "nodejs18.x"
-    }
-  },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "/autotag-pdf.js"
+      "source": "/(.*)",
+      "destination": "/autotag-pdf.js"
     }
   ]
 }
