@@ -76,6 +76,7 @@ async function analyzeDocx(fileData, filename) {
       gifsDetected: [],
       fileNameNeedsFixing: false,
       emptyHeadings: [],
+      headingOrderIssues: [],
       tablesHeaderRowSet: [],
     }
   };
@@ -121,6 +122,22 @@ async function analyzeDocx(fileData, filename) {
       report.summary.flagged += 1;
     }
     
+    // Check headings for empty content and proper order
+    const documentXml = await zip.file('word/document.xml')?.async('string');
+    if (documentXml) {
+      const headingResults = analyzeHeadings(documentXml);
+      
+      if (headingResults.emptyHeadings.length > 0) {
+        report.details.emptyHeadings = headingResults.emptyHeadings;
+        report.summary.flagged += headingResults.emptyHeadings.length;
+      }
+      
+      if (headingResults.orderIssues.length > 0) {
+        report.details.headingOrderIssues = headingResults.orderIssues;
+        report.summary.flagged += headingResults.orderIssues.length;
+      }
+    }
+    
     return report;
     
   } catch (error) {
@@ -131,4 +148,66 @@ async function analyzeDocx(fileData, filename) {
       details: {}
     };
   }
+}
+
+function analyzeHeadings(documentXml) {
+  const emptyHeadings = [];
+  const orderIssues = [];
+  const headings = [];
+  
+  // Match all paragraphs with heading styles
+  // Pattern: <w:pStyle w:val="Heading1"/> (or Heading2, etc.)
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+  
+  paragraphs.forEach((para, index) => {
+    // Check if this paragraph has a heading style
+    const headingMatch = para.match(/<w:pStyle w:val="Heading(\d+)"\/>/);
+    
+    if (headingMatch) {
+      const level = parseInt(headingMatch[1]);
+      
+      // Extract text content from the paragraph
+      const textMatches = para.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
+      let text = '';
+      
+      if (textMatches) {
+        text = textMatches
+          .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
+          .join('')
+          .trim();
+      }
+      
+      // Check for empty headings
+      if (!text || text.length === 0) {
+        emptyHeadings.push({
+          level: level,
+          position: headings.length + 1,
+          message: `Heading ${level} is empty`
+        });
+      }
+      
+      // Track heading for order checking
+      headings.push({ level, text, position: headings.length + 1 });
+    }
+  });
+  
+  // Check heading order
+  for (let i = 1; i < headings.length; i++) {
+    const prev = headings[i - 1];
+    const current = headings[i];
+    
+    // Headings should not skip levels (e.g., H1 -> H3 is wrong)
+    if (current.level > prev.level + 1) {
+      orderIssues.push({
+        position: current.position,
+        message: `Heading ${current.level} follows Heading ${prev.level} - skipped level ${prev.level + 1}`,
+        previousLevel: prev.level,
+        currentLevel: current.level,
+        text: current.text
+      });
+    }
+  }
+  
+  return { emptyHeadings, orderIssues };
 }
