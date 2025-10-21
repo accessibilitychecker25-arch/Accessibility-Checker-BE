@@ -34,11 +34,27 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- APP ----------
 app = FastAPI()
+# Configure CORS: make allowed origins configurable via ALLOWED_ORIGINS env var.
+# Provide sensible defaults for local dev and the GitHub Pages + Vercel hosts used by the frontend.
+default_origins = [
+    "http://localhost:4200",
+    "https://kmoreland126.github.io",
+    "https://accessibility-checker-rose.vercel.app",
+]
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
+if allowed_origins_env:
+    # comma-separated list in env var
+    allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = default_origins
+
+# Allow all common methods/headers for the API; tighten in production if needed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200"],
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=allowed_origins,
+    allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=False,
 )
 
 @app.middleware("http")
