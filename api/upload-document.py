@@ -590,5 +590,6 @@ async def download_document(file: UploadFile = File(...)):
         headers={"Content-Disposition": f'attachment; filename="{suggested_file_name}"'}
     )
 
-# Vercel serverless handler
-handler = app
+# Vercel serverless handler using Mangum
+from mangum import Mangum
+handler = Mangum(app)
