@@ -79,6 +79,7 @@ async function analyzeDocx(fileData, filename) {
       emptyHeadings: [],
       headingOrderIssues: [],
       tablesHeaderRowSet: [],
+      documentProtected: false,
     }
   };
 
@@ -136,6 +137,15 @@ async function analyzeDocx(fileData, filename) {
       if (headingResults.orderIssues.length > 0) {
         report.details.headingOrderIssues = headingResults.orderIssues;
         report.summary.flagged += headingResults.orderIssues.length;
+      }
+    }
+    
+    // Check for document protection
+    const settingsXml = await zip.file('word/settings.xml')?.async('string');
+    if (settingsXml) {
+      if (settingsXml.includes('<w:documentProtection')) {
+        report.details.documentProtected = true;
+        report.summary.flagged += 1;
       }
     }
     

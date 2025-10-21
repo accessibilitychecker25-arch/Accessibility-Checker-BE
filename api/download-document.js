@@ -113,7 +113,17 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
-    // Fix 3: Fix empty headings and heading order issues
+    // Fix 3: Remove document protection
+    const settingsXmlFile = zip.file('word/settings.xml');
+    if (settingsXmlFile) {
+      let settingsXml = await settingsXmlFile.async('string');
+      // Remove document protection element if it exists
+      settingsXml = settingsXml.replace(/<w:documentProtection[^>]*\/>/g, '');
+      settingsXml = settingsXml.replace(/<w:documentProtection[^>]*>[\s\S]*?<\/w:documentProtection>/g, '');
+      zip.file('word/settings.xml', settingsXml);
+    }
+    
+    // Fix 4: Fix empty headings and heading order issues
     const documentXmlFile = zip.file('word/document.xml');
     if (documentXmlFile) {
       let documentXml = await documentXmlFile.async('string');
