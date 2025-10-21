@@ -1,13 +1,13 @@
 {
   "functions": {
-    "docx-converter.js": {
+    "autotag-pdf.js": {
       "runtime": "@vercel/node@18"
     }
   },
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/docx-converter.js"
+      "dest": "/autotag-pdf.js"
     }
   ]
 }

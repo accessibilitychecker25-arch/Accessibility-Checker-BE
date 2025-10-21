@@ -48,11 +48,28 @@ require('dotenv').config();
 
 const app = express();
 
+// CORS configuration: allow GitHub Pages, Vercel frontend, and localhost
+const allowedOrigins = [
+  'http://localhost:4200',
+  'https://kmoreland126.github.io',
+  'https://accessibility-checker-rose.vercel.app',
+];
+
 app.use(
   cors({
-    origin: 'http://localhost:4200',
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Disallowed CORS origin'));
+      }
+    },
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type'],
+    credentials: false,
   })
 );
 
