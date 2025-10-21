@@ -1,9 +1,11 @@
 {
-  "functions": {
-    "docx-converter.js": {
-      "runtime": "@vercel/node@18"
+  "version": 2,
+  "builds": [
+    {
+      "src": "docx-converter.js",
+      "use": "@vercel/node"
     }
-  },
+  ],
   "routes": [
     {
       "src": "/(.*)",
