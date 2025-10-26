@@ -10,7 +10,7 @@ echo "Testing Accessibility Checker Backend Endpoints"
 echo "================================================"
 echo ""
 
-BASE_URL="https://accessibility-checker-rose.vercel.app"
+BASE_URL="https://accessibility-checker-be.vercel.app"
 TEST_DIR="./Accessibility Standards"
 
 # Test files
@@ -64,7 +64,7 @@ echo ""
 echo -e "${YELLOW}Testing CORS Headers...${NC}"
 echo -n "Testing OPTIONS preflight ... "
 CORS_RESPONSE=$(curl -s -X OPTIONS \
-  -H "Origin: https://kmoreland126.github.io" \
+  -H "Origin: https://accessibilitychecker25-arch.github.io" \
   -H "Access-Control-Request-Method: POST" \
   "${BASE_URL}/api/upload-document" -i)
 

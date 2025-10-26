@@ -38,8 +38,8 @@ app = FastAPI()
 # Provide sensible defaults for local dev and the GitHub Pages + Vercel hosts used by the frontend.
 default_origins = [
     "http://localhost:4200",
-    "https://kmoreland126.github.io",
-    "https://accessibility-checker-rose.vercel.app",
+    "https://accessibilitychecker25-arch.github.io",
+    "https://accessibility-checker-be.vercel.app",
 ]
 allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
 if allowed_origins_env:

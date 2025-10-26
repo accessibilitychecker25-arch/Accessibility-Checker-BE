@@ -3,7 +3,7 @@ const JSZip = require('jszip');
 
 module.exports = async (req, res) => {
   // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://kmoreland126.github.io');
+  res.setHeader('Access-Control-Allow-Origin', 'https://accessibilitychecker25-arch.github.io');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Type');
