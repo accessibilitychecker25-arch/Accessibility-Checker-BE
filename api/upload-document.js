@@ -2,11 +2,21 @@ const Busboy = require('busboy');
 const JSZip = require('jszip');
 
 module.exports = async (req, res) => {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://accessibilitychecker25-arch.github.io');
+  // CORS: safe allowlist — echo back the requesting Origin when allowed.
+  const ALLOWED_ORIGINS = [
+    'https://accessibilitychecker25-arch.github.io',
+    'https://kmoreland126.github.io',
+    'http://localhost:3000',
+    'http://localhost:4200'
+  ];
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Type');
+  // Expose Content-Disposition for downloads and Content-Type for clients
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
 
   if (req.method === 'OPTIONS') {
     res.status(200).end();
