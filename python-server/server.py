@@ -567,17 +567,19 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
         if ts is not None:
             current_xml = ts
             styles_changed = True
-            report["details"]["textShadowsRemoved"] = True
-            report["summary"]["fixed"] += 1
+            if not report["details"]["textShadowsRemoved"]:
+                report["details"]["textShadowsRemoved"] = True
+                report["summary"]["fixed"] += 1
             
         # 3. Normalize fonts and sizes
         norm = enforce_sans_serif_and_min_size_bytes(current_xml)
         if norm is not None:
             current_xml = norm
             styles_changed = True
-            report["details"]["fontsNormalized"] = True
-            report["details"]["fontSizesNormalized"] = True
-            report["summary"]["fixed"] += 1
+            if not report["details"]["fontsNormalized"]:
+                report["details"]["fontsNormalized"] = True
+                report["details"]["fontSizesNormalized"] = True
+                report["summary"]["fixed"] += 1
             
         # Save the final result if anything changed
         if styles_changed:
@@ -603,17 +605,19 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
         if tsd is not None:
             current_doc_xml = tsd
             doc_changed = True
-            report["details"]["textShadowsRemoved"] = True
-            report["summary"]["fixed"] += 1
+            if not report["details"]["textShadowsRemoved"]:
+                report["details"]["textShadowsRemoved"] = True
+                report["summary"]["fixed"] += 1
             
         # 2. Normalize fonts and sizes
         norm_doc = enforce_sans_serif_and_min_size_bytes(current_doc_xml)
         if norm_doc is not None:
             current_doc_xml = norm_doc
             doc_changed = True
-            report["details"]["fontsNormalized"] = True
-            report["details"]["fontSizesNormalized"] = True
-            report["summary"]["fixed"] += 1
+            if not report["details"]["fontsNormalized"]:
+                report["details"]["fontsNormalized"] = True
+                report["details"]["fontSizesNormalized"] = True
+                report["summary"]["fixed"] += 1
             
         # Save the final result if anything changed
         if doc_changed:
