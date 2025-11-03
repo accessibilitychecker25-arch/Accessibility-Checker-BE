@@ -602,14 +602,45 @@ async def download_document(file: UploadFile = File(...)):
     slugified_filename = slugify(base_filename)  # Apply the slugify function
     suggested_file_name = f"{slugified_filename}.docx"  # Add "-remediated" suffix
 
-    # Now, prepare the remediated file for streaming back to the user
+    # Validate the rebuilt package before returning it to the client.
+    # If validation fails, return a clear JSON error instead of a (possibly corrupt) binary stream.
+    import hashlib
+    sha256 = hashlib.sha256(final_bytes).hexdigest()
+
+    # Quick OOXML ZIP validation: open as zip and check essential parts exist.
+    invalid_reason = None
+    try:
+        with ZipFile(BytesIO(final_bytes), "r") as zf_check:
+            namelist = zf_check.namelist()
+            # Minimal required parts for a valid docx
+            required = ["[Content_Types].xml", "word/document.xml"]
+            missing = [r for r in required if r not in namelist]
+            if missing:
+                invalid_reason = {"missingParts": missing, "entries": namelist}
+    except Exception as e:
+        invalid_reason = {"error": str(e)}
+
+    if invalid_reason is not None:
+        # Return JSON error with details and a helpful message
+        return JSONResponse({
+            "error": "remediator_failed",
+            "message": "Remediation produced an invalid .docx package",
+            "details": invalid_reason,
+        }, status_code=500)
+
+    # Now, prepare the remediated file for streaming back to the user and include a SHA256 header
     def iterfile():
-        yield final_bytes  # Stream the remediated file directly
+        yield final_bytes
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{suggested_file_name}"',
+        "X-Docx-SHA256": sha256,
+    }
 
     return StreamingResponse(
         iterfile(),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{suggested_file_name}"'}
+        headers=headers,
     )
 
 # Vercel serverless handler

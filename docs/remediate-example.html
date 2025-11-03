@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Remediate & Download Example</title>
+  <style>
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial; padding: 24px; }
+    .banner { padding: 12px; border: 1px solid #d0d7de; background: #f6f8fa; margin-bottom: 16px; }
+    .btn { display: inline-block; padding: 8px 12px; background: #0366d6; color: white; border-radius: 6px; text-decoration: none; }
+    .muted { color: #666; font-size: 0.95rem }
+    pre { background:#f3f4f6;padding:12px;border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h1>Remediate & Download (example)</h1>
+
+  <div class="banner" id="remediateBanner">
+    <strong>Tip:</strong> If the downloaded file opens in Protected View, Windows may have marked it as downloaded from the Internet.
+    See the "Unblock" instructions below.
+  </div>
+
+  <p class="muted">This example triggers a native download by posting a file to the backend `/download-document` endpoint. Use the form file input to pick a .docx and click "Remediate & Download".</p>
+
+  <form id="remediateForm" action="/api/download-document" method="post" enctype="multipart/form-data" style="margin-top:12px;">
+    <input id="fileInput" name="file" type="file" accept=".docx" />
+    <button id="go" class="btn" type="submit">Remediate & Download</button>
+  </form>
+
+  <h2>If your file opens in Protected View</h2>
+  <p>Windows may add the Mark-of-the-Web (Zone.Identifier) to downloaded files. To remove it locally:</p>
+  <pre>PowerShell: Unblock-File -Path 'C:\path\to\your\downloaded.docx'</pre>
+  <p>To check for alternate data streams (Zone.Identifier):</p>
+  <pre>PowerShell: Get-Item -Path 'C:\path\to\your\downloaded.docx' -Stream *</pre>
+
+  <h3>Optional: programmatic download example (fetch + blob)</h3>
+  <p class="muted">If you prefer fetching the file with JS and saving a blob (note: native downloads via form submit often behave better for Content-Disposition handling and browser integration):</p>
+  <pre>
+// Example (browser):
+// const data = new FormData();
+// data.append('file', fileInput.files[0]);
+// fetch('/api/download-document', { method: 'POST', body: data })
+//   .then(r => {
+//     const filename = r.headers.get('content-disposition')?.split('filename=')?.[1]?.replace(/\"/g, '') || 'remediated.docx';
+//     return r.blob().then(b => ({ b, filename }));
+//   })
+//   .then(({ b, filename }) => {
+//     const url = URL.createObjectURL(b);
+//     const a = document.createElement('a');
+//     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+//   })
+  </pre>
+
+  <script>
+    // Small UX: show a notice if user tries to remediate without selecting a file
+    document.getElementById('remediateForm').addEventListener('submit', function (e) {
+      const f = document.getElementById('fileInput');
+      if (!f.files || !f.files.length) {
+        e.preventDefault();
+        alert('Please pick a .docx file first');
+        return false;
+      }
+      // Let the form submit normally so the browser triggers a download.
+    });
+  </script>
+</body>
+</html>
