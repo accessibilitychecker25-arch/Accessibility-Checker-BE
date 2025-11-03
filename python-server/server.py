@@ -154,13 +154,30 @@ def remove_protection_bytes(orig_xml: bytes) -> Optional[bytes]:
     print(orig_xml)
     root = etree.fromstring(orig_xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    # Remove documentProtection, writeProtection and readOnlyRecommended if present
+    # Remove documentProtection, writeProtection, readOnlyRecommended, editRestrictions, formProtection if present
     removed = False
-    for tag in ("documentProtection", "writeProtection", "readOnlyRecommended"):
+    for tag in ("documentProtection", "writeProtection", "readOnlyRecommended", "editRestrictions", "formProtection"):
         el = root.find(f"w:{tag}", ns)
         if el is not None:
             el.getparent().remove(el)
             removed = True
+
+    # Remove <w:locked/> elements and any w:locked attributes on child elements
+    for locked_el in root.findall('.//w:locked', ns):
+        parent = locked_el.getparent()
+        if parent is not None:
+            parent.remove(locked_el)
+            removed = True
+
+    # Remove w:locked attributes from any elements
+    for el in root.findall('.//*'):
+        if el.get(qn('w:locked')) is not None:
+            try:
+                del el.attrib[qn('w:locked')]
+                removed = True
+            except Exception:
+                pass
+
     if not removed:
         return None
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")

@@ -124,17 +124,16 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
-    // Fix 3: Remove document protection / write-protection / read-only recommendation
+    // Fix 3: Remove document protection / write-protection / read-only recommendation and edit locks
     const settingsXmlFile = zip.file('word/settings.xml');
     if (settingsXmlFile) {
       let settingsXml = await settingsXmlFile.async('string');
-      // Remove documentProtection, writeProtection and readOnlyRecommended elements if they exist
-      settingsXml = settingsXml.replace(/<w:documentProtection[^>]*\/>/g, '');
-      settingsXml = settingsXml.replace(/<w:documentProtection[^>]*>[\s\S]*?<\/w:documentProtection>/g, '');
-      settingsXml = settingsXml.replace(/<w:writeProtection[^>]*\/>/g, '');
-      settingsXml = settingsXml.replace(/<w:writeProtection[^>]*>[\s\S]*?<\/w:writeProtection>/g, '');
-      settingsXml = settingsXml.replace(/<w:readOnlyRecommended[^>]*\/>/g, '');
-      settingsXml = settingsXml.replace(/<w:readOnlyRecommended[^>]*>[\s\S]*?<\/w:readOnlyRecommended>/g, '');
+      // Remove known protection elements if they exist (covers several Office variants)
+      settingsXml = settingsXml.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '');
+      settingsXml = settingsXml.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '');
+      // Remove any standalone <w:locked/> elements and any w:locked attributes that may enforce locking
+      settingsXml = settingsXml.replace(/<w:locked[^>]*\/>/g, '');
+      settingsXml = settingsXml.replace(/\s?w:locked=\"[^\"]*\"/g, '');
       zip.file('word/settings.xml', settingsXml);
     }
     

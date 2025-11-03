@@ -156,7 +156,10 @@ async function analyzeDocx(fileData, filename) {
       if (
         settingsXml.includes('<w:documentProtection') ||
         settingsXml.includes('<w:writeProtection') ||
-        settingsXml.includes('<w:readOnlyRecommended')
+        settingsXml.includes('<w:readOnlyRecommended') ||
+        settingsXml.includes('<w:editRestrictions') ||
+        settingsXml.includes('<w:formProtection') ||
+        settingsXml.includes('<w:locked')
       ) {
         report.details.documentProtected = true;
         report.summary.flagged += 1;
