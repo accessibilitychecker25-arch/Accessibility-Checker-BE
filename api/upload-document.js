@@ -90,6 +90,9 @@ async function analyzeDocx(fileData, filename) {
       headingOrderIssues: [],
       tablesHeaderRowSet: [],
       documentProtected: false,
+      textShadowsRemoved: false,
+      fontsNormalized: false,
+      fontSizesNormalized: false,
     }
   };
 
@@ -166,6 +169,18 @@ async function analyzeDocx(fileData, filename) {
       }
     }
     
+    // Check for text shadows, serif fonts, and small font sizes
+    const shadowFontResults = await analyzeShadowsAndFonts(zip);
+    if (shadowFontResults.hasShadows) {
+      report.details.textShadowsRemoved = true;
+      report.summary.fixed += 1;
+    }
+    if (shadowFontResults.hasSerifFonts || shadowFontResults.hasSmallFonts) {
+      report.details.fontsNormalized = true;
+      report.details.fontSizesNormalized = true;
+      report.summary.fixed += 1;
+    }
+    
     // Scan for any remaining suspicious protection/encryption markers to help debug Protected View
     try {
       const remaining = await scanForRemainingProtection(fileData);
@@ -203,6 +218,68 @@ function findRemainingProtectionMatches(zip) {
       details: {}
     };
   }
+// Analyze shadows and fonts in the document
+async function analyzeShadowsAndFonts(zip) {
+  const results = {
+    hasShadows: false,
+    hasSerifFonts: false,
+    hasSmallFonts: false
+  };
+
+  // Check document.xml for shadows, fonts, and sizes
+  const documentXml = await zip.file('word/document.xml')?.async('string');
+  if (documentXml) {
+    // Check for shadows
+    if (/<[^>]*shadow[^>]*>/i.test(documentXml)) {
+      results.hasShadows = true;
+    }
+    
+    // Check for serif fonts (Times, Times New Roman, Georgia, etc.)
+    if (/(Times|Georgia|Garamond|serif)/i.test(documentXml)) {
+      results.hasSerifFonts = true;
+    }
+    
+    // Check for small font sizes (less than 22 half-points = 11pt)
+    const sizeMatches = documentXml.match(/<w:sz w:val="(\d+)"/g);
+    if (sizeMatches) {
+      for (const match of sizeMatches) {
+        const size = parseInt(match.match(/\d+/)[0]);
+        if (size < 22) {
+          results.hasSmallFonts = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Check styles.xml for shadows, fonts, and sizes
+  const stylesXml = await zip.file('word/styles.xml')?.async('string');
+  if (stylesXml) {
+    if (!results.hasShadows && /<[^>]*shadow[^>]*>/i.test(stylesXml)) {
+      results.hasShadows = true;
+    }
+    
+    if (!results.hasSerifFonts && /(Times|Georgia|Garamond|serif)/i.test(stylesXml)) {
+      results.hasSerifFonts = true;
+    }
+    
+    if (!results.hasSmallFonts) {
+      const sizeMatches = stylesXml.match(/<w:sz w:val="(\d+)"/g);
+      if (sizeMatches) {
+        for (const match of sizeMatches) {
+          const size = parseInt(match.match(/\d+/)[0]);
+          if (size < 22) {
+            results.hasSmallFonts = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 // Async scan for remaining protection/encryption related strings in xml parts
 async function scanForRemainingProtection(fileData) {
   const zip = await JSZip.loadAsync(fileData);

@@ -137,12 +137,20 @@ async function remediateDocx(fileData, filename) {
       zip.file('word/settings.xml', settingsXml);
     }
     
-    // Fix 4: Fix empty headings and heading order issues
+    // Fix 4: Remove text shadows and normalize fonts/sizes
     const documentXmlFile = zip.file('word/document.xml');
     if (documentXmlFile) {
       let documentXml = await documentXmlFile.async('string');
       documentXml = fixHeadings(documentXml);
+      documentXml = removeShadowsAndNormalizeFonts(documentXml);
       zip.file('word/document.xml', documentXml);
+    }
+
+    // Fix 5: Apply same shadow/font fixes to styles.xml
+    if (stylesXmlFile) {
+      let stylesXml = await stylesXmlFile.async('string');
+      stylesXml = removeShadowsAndNormalizeFonts(stylesXml);
+      zip.file('word/styles.xml', stylesXml);
     }
     
     // Generate the remediated DOCX file
@@ -237,6 +245,47 @@ function fixHeadings(documentXml) {
     previousHeadingLevel = level;
     return `<w:p>${content}</w:p>`;
   });
+  
+  return fixedXml;
+}
+
+function removeShadowsAndNormalizeFonts(xmlContent) {
+  let fixedXml = xmlContent;
+  
+  // 1. Remove text shadows
+  fixedXml = fixedXml.replace(/<w:shadow\s*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w:shadow[^>]*>.*?<\/w:shadow>/g, '');
+  fixedXml = fixedXml.replace(/\s+\w*shadow\w*\s*=\s*"[^"]*"/g, '');
+  
+  // 2. Normalize fonts to Arial (sans-serif)
+  fixedXml = fixedXml.replace(
+    /<w:rFonts[^>]*\/?>/g,
+    '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:eastAsia="Arial"/>'
+  );
+  
+  // 3. Ensure minimum font size of 22 half-points (11pt)
+  fixedXml = fixedXml.replace(
+    /<w:sz w:val="(\d+)"\s*\/>/g,
+    (match, size) => {
+      const sizeNum = parseInt(size);
+      if (sizeNum < 22) {
+        return '<w:sz w:val="22"/>';
+      }
+      return match;
+    }
+  );
+  
+  // 4. Same for complex script font sizes
+  fixedXml = fixedXml.replace(
+    /<w:szCs w:val="(\d+)"\s*\/>/g,
+    (match, size) => {
+      const sizeNum = parseInt(size);
+      if (sizeNum < 22) {
+        return '<w:szCs w:val="22"/>';
+      }
+      return match;
+    }
+  );
   
   return fixedXml;
 }
