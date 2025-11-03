@@ -166,9 +166,36 @@ async function analyzeDocx(fileData, filename) {
       }
     }
     
+    // Scan for any remaining suspicious protection/encryption markers to help debug Protected View
+    try {
+      const remaining = await scanForRemainingProtection(fileData);
+      if (remaining && remaining.length) {
+        report.details.remainingProtectionMatches = remaining;
+      }
+    } catch (e) {
+      // ignore scanning errors
+    }
+
     return report;
     
   } catch (error) {
+// Helper: scan the package bytes for remaining protection/encryption-related strings
+function findRemainingProtectionMatches(zip) {
+  const needleRegex = /documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|locked|enforcement|hash|salt|cryptProvider|EncryptedPackage|encryption/gi;
+  const matches = new Set();
+  zip.forEach((relativePath, file) => {
+    if (!relativePath) return;
+    const lc = relativePath.toLowerCase();
+    // Only scan XML parts and rels
+    if (lc.endsWith('.xml') || lc.endsWith('.rels') || lc === '[content_types].xml') {
+      const txt = file.async('string').catch(() => '');
+      // note: file.async returns promise; we'll collect promises later
+    }
+  });
+  // Synchronous scan isn't possible here because async calls are needed.
+  // We'll implement a full async scan where this helper is used.
+  return null;
+}
     return {
       fileName: filename,
       error: error.message,
@@ -176,6 +203,28 @@ async function analyzeDocx(fileData, filename) {
       details: {}
     };
   }
+// Async scan for remaining protection/encryption related strings in xml parts
+async function scanForRemainingProtection(fileData) {
+  const zip = await JSZip.loadAsync(fileData);
+  const needleRegex = /documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|locked|enforcement|hash|salt|cryptProvider|EncryptedPackage|encryption/gi;
+  const findings = [];
+  const promises = [];
+  zip.forEach((relativePath, file) => {
+    const lc = (relativePath || '').toLowerCase();
+    if (lc.endsWith('.xml') || lc.endsWith('.rels') || lc === '[content_types].xml') {
+      const p = file.async('string').then(txt => {
+        const m = txt.match(needleRegex);
+        if (m && m.length) {
+          findings.push({ part: relativePath, matches: Array.from(new Set(m)) });
+        }
+      }).catch(() => {});
+      promises.push(p);
+    }
+  });
+  await Promise.all(promises);
+  return findings;
+}
+
 }
 
 function analyzeHeadings(documentXml) {
