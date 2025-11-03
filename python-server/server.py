@@ -185,118 +185,57 @@ def remove_protection_bytes(orig_xml: bytes) -> Optional[bytes]:
 
 def remove_text_shadow_bytes(orig_xml: bytes) -> Optional[bytes]:
     """Remove text shadow elements/attributes from XML parts.
-    Works generically by removing elements whose local-name is 'shadow'
-    and removing attributes that contain the token 'shadow'.
+    Uses regex-based approach for reliable shadow removal.
     """
-    root = etree.fromstring(orig_xml)
-    removed = False
-
-    # Use XPath to find shadow elements more reliably
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    xml_str = orig_xml.decode('utf-8', errors='ignore')
+    original_xml = xml_str
     
-    # Remove <w:shadow> elements specifically
-    for el in root.xpath('.//w:shadow', namespaces=ns):
-        parent = el.getparent()
-        if parent is not None:
-            parent.remove(el)
-            removed = True
-
-    # Also remove any shadow elements with different namespaces
-    for el in root.xpath('.//*[local-name()="shadow"]'):
-        parent = el.getparent()
-        if parent is not None:
-            parent.remove(el)
-            removed = True
-
-    # Remove attributes that include 'shadow' in the name
-    for el in root.findall('.//*'):
-        for attr in list(el.attrib.keys()):
-            if 'shadow' in attr.lower():
-                try:
-                    del el.attrib[attr]
-                    removed = True
-                except Exception:
-                    pass
-
-    if not removed:
+    # Remove <w:shadow/> self-closing elements
+    xml_str = re.sub(r'<w:shadow\s*/>', '', xml_str, flags=re.I)
+    
+    # Remove <w:shadow>...</w:shadow> paired elements
+    xml_str = re.sub(r'<w:shadow[^>]*>.*?</w:shadow>', '', xml_str, flags=re.I | re.S)
+    
+    # Remove shadow attributes (like shadowAttr="value")
+    xml_str = re.sub(r'\s+\w*shadow\w*\s*=\s*"[^"]*"', '', xml_str, flags=re.I)
+    
+    # Check if anything was changed
+    if xml_str == original_xml:
         return None
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
+    
+    return xml_str.encode('utf-8')
 
 
 def enforce_sans_serif_and_min_size_bytes(orig_xml: bytes, min_half_points: int = 22, font_name: str = "Arial") -> Optional[bytes]:
     """Normalize fonts to a sans-serif (default Arial) and ensure font size at least min_half_points (11pt=22).
-    This operates on any XML part (document.xml or styles.xml) by updating rFonts and sz/szCs elements.
+    Uses regex-based approach for reliable font and size changes.
     """
-    root = etree.fromstring(orig_xml)
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    changed = False
-
-    # Normalize rFonts to the chosen sans-serif using XPath
-    for rfonts in root.xpath('.//w:rFonts', namespaces=ns):
-        try:
-            rfonts.set(qn('w:ascii'), font_name)
-            rfonts.set(qn('w:hAnsi'), font_name)
-            rfonts.set(qn('w:cs'), font_name)
-            rfonts.set(qn('w:eastAsia'), font_name)
-            changed = True
-        except Exception:
-            pass
-
-    # Also catch rFonts without namespace prefix (fallback)
-    for rfonts in root.findall('.//*[local-name()="rFonts"]'):
-        try:
-            # Set attributes with proper namespace
-            rfonts.set(qn('w:ascii'), font_name)
-            rfonts.set(qn('w:hAnsi'), font_name)
-            rfonts.set(qn('w:cs'), font_name)
-            rfonts.set(qn('w:eastAsia'), font_name)
-            changed = True
-        except Exception:
-            pass
-
-    # Ensure sizes (w:sz and w:szCs) are at least min_half_points
-    for name in ("sz", "szCs"):
-        # Use XPath with namespace first
-        for sz in root.xpath(f'.//w:{name}', namespaces=ns):
-            val = sz.get(qn('w:val'))
-            try:
-                if val is None:
-                    sz.set(qn('w:val'), str(min_half_points))
-                    changed = True
-                else:
-                    cur = int(val)
-                    if cur < min_half_points:
-                        sz.set(qn('w:val'), str(min_half_points))
-                        changed = True
-            except Exception:
-                try:
-                    sz.set(qn('w:val'), str(min_half_points))
-                    changed = True
-                except Exception:
-                    pass
-        
-        # Fallback: local-name approach
-        for sz in root.findall(f'.//*[local-name()="{name}"]'):
-            val = sz.get(qn('w:val')) or sz.get('val')
-            try:
-                if val is None:
-                    sz.set(qn('w:val'), str(min_half_points))
-                    changed = True
-                else:
-                    cur = int(val)
-                    if cur < min_half_points:
-                        sz.set(qn('w:val'), str(min_half_points))
-                        changed = True
-            except Exception:
-                try:
-                    sz.set(qn('w:val'), str(min_half_points))
-                    changed = True
-                except Exception:
-                    pass
-
-    if not changed:
+    xml_str = orig_xml.decode('utf-8', errors='ignore')
+    original_xml = xml_str
+    
+    # 1. Replace font families in rFonts elements
+    def replace_fonts(match):
+        return f'<w:rFonts w:ascii="{font_name}" w:hAnsi="{font_name}" w:cs="{font_name}" w:eastAsia="{font_name}"/>'
+    
+    xml_str = re.sub(r'<w:rFonts[^>]*/?>', replace_fonts, xml_str)
+    
+    # 2. Fix font sizes (w:sz elements) - ensure minimum size
+    def replace_size(match):
+        val = int(match.group(1))
+        if val < min_half_points:
+            return f'<w:sz w:val="{min_half_points}"/>'
+        return match.group(0)
+    
+    xml_str = re.sub(r'<w:sz w:val="(\d+)"/>', replace_size, xml_str)
+    
+    # 3. Fix complex script font sizes (w:szCs elements) - ensure minimum size
+    xml_str = re.sub(r'<w:szCs w:val="(\d+)"/>', replace_size, xml_str)
+    
+    # Check if anything was changed
+    if xml_str == original_xml:
         return None
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
+    
+    return xml_str.encode('utf-8')
 
 def set_default_lang_en_us_bytes(orig_xml: bytes) -> Optional[bytes]:
     root = etree.fromstring(orig_xml)
