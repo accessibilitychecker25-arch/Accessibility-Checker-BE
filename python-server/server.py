@@ -182,6 +182,83 @@ def remove_protection_bytes(orig_xml: bytes) -> Optional[bytes]:
         return None
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
 
+
+def remove_text_shadow_bytes(orig_xml: bytes) -> Optional[bytes]:
+    """Remove text shadow elements/attributes from XML parts.
+    Works generically by removing elements whose local-name is 'shadow'
+    and removing attributes that contain the token 'shadow'.
+    """
+    root = etree.fromstring(orig_xml)
+    removed = False
+
+    # Remove any <*:shadow> elements
+    for el in root.findall('.//*[local-name()="shadow"]'):
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
+            removed = True
+
+    # Remove attributes that include 'shadow' in the name
+    for el in root.findall('.//*'):
+        for attr in list(el.attrib.keys()):
+            if 'shadow' in attr.lower():
+                try:
+                    del el.attrib[attr]
+                    removed = True
+                except Exception:
+                    pass
+
+    if not removed:
+        return None
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
+
+
+def enforce_sans_serif_and_min_size_bytes(orig_xml: bytes, min_half_points: int = 22, font_name: str = "Arial") -> Optional[bytes]:
+    """Normalize fonts to a sans-serif (default Arial) and ensure font size at least min_half_points (11pt=22).
+    This operates on any XML part (document.xml or styles.xml) by updating rFonts and sz/szCs elements.
+    """
+    root = etree.fromstring(orig_xml)
+    ns_w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    changed = False
+
+    # Normalize rFonts to the chosen sans-serif
+    for rfonts in root.findall('.//*[local-name()="rFonts"]'):
+        try:
+            rfonts.set(qn('w:ascii'), font_name)
+            rfonts.set(qn('w:hAnsi'), font_name)
+            rfonts.set(qn('w:cs'), font_name)
+            rfonts.set(qn('w:eastAsia'), font_name)
+            changed = True
+        except Exception:
+            pass
+
+    # Ensure sizes (w:sz and w:szCs) are at least min_half_points
+    for name in ("sz", "szCs"):
+        for sz in root.findall(f'.//*[local-name()="{name}"]'):
+            # Try to read the w:val attribute
+            val = sz.get(qn('w:val')) or sz.get('val')
+            try:
+                if val is None:
+                    # if no value, set it
+                    sz.set(qn('w:val'), str(min_half_points))
+                    changed = True
+                else:
+                    cur = int(val)
+                    if cur < min_half_points:
+                        sz.set(qn('w:val'), str(min_half_points))
+                        changed = True
+            except Exception:
+                # if parse fails, set to minimum
+                try:
+                    sz.set(qn('w:val'), str(min_half_points))
+                    changed = True
+                except Exception:
+                    pass
+
+    if not changed:
+        return None
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
+
 def set_default_lang_en_us_bytes(orig_xml: bytes) -> Optional[bytes]:
     root = etree.fromstring(orig_xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
@@ -451,6 +528,9 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
         "summary": {"fixed": 0, "flagged": 0},
         "details": {
             "removedProtection": False,
+            "textShadowsRemoved": False,
+            "fontsNormalized": False,
+            "fontSizesNormalized": False,
             "fileNameFixed": False,
             "fileNameNeedsFixing": False,
             "titleNeedsFixing": False,
@@ -497,6 +577,19 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
             replacements["word/styles.xml"] = new_styles
             report["details"]["languageDefaultFixed"] = {"setTo": "en-US"}
             report["summary"]["fixed"] += 1
+        # Remove text shadow and normalize fonts/sizes in styles
+        ts = remove_text_shadow_bytes(styles_xml)
+        if ts is not None:
+            replacements.setdefault("word/styles.xml", ts)
+            report["details"]["textShadowsRemoved"] = True
+            report["summary"]["fixed"] += 1
+        norm = enforce_sans_serif_and_min_size_bytes(styles_xml)
+        if norm is not None:
+            # If we've already set a replacement for styles, it will be overwritten by the last
+            replacements["word/styles.xml"] = norm
+            report["details"]["fontsNormalized"] = True
+            report["details"]["fontSizesNormalized"] = True
+            report["summary"]["fixed"] += 1
 
     core_xml = read_xml_part(phase_a_bytes, "docProps/core.xml")
     if core_xml:
@@ -505,6 +598,21 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
             replacements["docProps/core.xml"] = new_core
             report["details"]["titleNeedsFixing"] = True
             report["summary"]["flagged"] += 1
+
+    # Also operate on the main document body for shadows/fonts/sizes
+    doc_xml = read_xml_part(phase_a_bytes, "word/document.xml")
+    if doc_xml:
+        tsd = remove_text_shadow_bytes(doc_xml)
+        if tsd is not None:
+            replacements["word/document.xml"] = tsd
+            report["details"]["textShadowsRemoved"] = True
+            report["summary"]["fixed"] += 1
+        norm_doc = enforce_sans_serif_and_min_size_bytes(doc_xml)
+        if norm_doc is not None:
+            replacements["word/document.xml"] = norm_doc
+            report["details"]["fontsNormalized"] = True
+            report["details"]["fontSizesNormalized"] = True
+            report["summary"]["fixed"] += 1
 
     final_bytes = write_pkg_xml(phase_a_bytes, replacements)
     tmp_path.unlink(missing_ok=True)
@@ -586,12 +694,29 @@ async def download_document(file: UploadFile = File(...)):
         new_styles = set_default_lang_en_us_bytes(styles_xml)
         if new_styles:
             replacements["word/styles.xml"] = new_styles
+        # Remove text shadow and normalize fonts/sizes in styles
+        ts = remove_text_shadow_bytes(styles_xml)
+        if ts is not None:
+            replacements.setdefault("word/styles.xml", ts)
+        norm = enforce_sans_serif_and_min_size_bytes(styles_xml)
+        if norm is not None:
+            replacements["word/styles.xml"] = norm
 
     core_xml = read_xml_part(phase_a_bytes, "docProps/core.xml")
     if core_xml:
         new_core = ensure_title_bytes(core_xml)
         if new_core:
             replacements["docProps/core.xml"] = new_core
+
+    # Also operate on document.xml for shadows/fonts/sizes in the download flow
+    doc_xml = read_xml_part(phase_a_bytes, "word/document.xml")
+    if doc_xml:
+        tsd = remove_text_shadow_bytes(doc_xml)
+        if tsd is not None:
+            replacements["word/document.xml"] = tsd
+        norm_doc = enforce_sans_serif_and_min_size_bytes(doc_xml)
+        if norm_doc is not None:
+            replacements["word/document.xml"] = norm_doc
 
     # Rebuild the file with all fixes (same logic as upload)
     final_bytes = write_pkg_xml(phase_a_bytes, replacements)
