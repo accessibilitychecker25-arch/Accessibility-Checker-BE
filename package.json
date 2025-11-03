@@ -4,8 +4,8 @@
   "description": "DOCX Accessibility Checker Backend",
   "dependencies": {
     "busboy": "^1.6.0",
-    "jszip": "^3.10.1",
-    "docx": "^8.5.0"
+    "docx": "^8.5.0",
+    "jszip": "^3.10.1"
   },
   "engines": {
     "node": ">=18"

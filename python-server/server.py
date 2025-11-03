@@ -184,20 +184,43 @@ def remove_protection_bytes(orig_xml: bytes) -> Optional[bytes]:
 
 
 def remove_text_shadow_bytes(orig_xml: bytes) -> Optional[bytes]:
-    """Remove text shadow elements/attributes from XML parts.
-    Uses regex-based approach for reliable shadow removal.
+    """Remove all text shadow elements, effects, and attributes from XML parts.
+    Uses comprehensive regex-based approach for reliable shadow removal including advanced effects.
     """
     xml_str = orig_xml.decode('utf-8', errors='ignore')
     original_xml = xml_str
     
-    # Remove <w:shadow/> self-closing elements
+    # Remove basic Word shadow elements
     xml_str = re.sub(r'<w:shadow\s*/>', '', xml_str, flags=re.I)
-    
-    # Remove <w:shadow>...</w:shadow> paired elements
     xml_str = re.sub(r'<w:shadow[^>]*>.*?</w:shadow>', '', xml_str, flags=re.I | re.S)
-    
-    # Remove shadow attributes (like shadowAttr="value")
     xml_str = re.sub(r'\s+\w*shadow\w*\s*=\s*"[^"]*"', '', xml_str, flags=re.I)
+    
+    # Remove advanced DrawingML shadow effects (outerShdw, innerShdw, prstShdw)
+    xml_str = re.sub(r'<a:outerShdw[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<a:outerShdw[^>]*>.*?</a:outerShdw>', '', xml_str, flags=re.I | re.S)
+    xml_str = re.sub(r'<a:innerShdw[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<a:innerShdw[^>]*>.*?</a:innerShdw>', '', xml_str, flags=re.I | re.S)
+    xml_str = re.sub(r'<a:prstShdw[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<a:prstShdw[^>]*>.*?</a:prstShdw>', '', xml_str, flags=re.I | re.S)
+    
+    # Remove Office 2010+ shadow and text effects
+    xml_str = re.sub(r'<w14:shadow[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<w14:shadow[^>]*>.*?</w14:shadow>', '', xml_str, flags=re.I | re.S)
+    xml_str = re.sub(r'<w15:shadow[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<w15:shadow[^>]*>.*?</w15:shadow>', '', xml_str, flags=re.I | re.S)
+    
+    # Remove related visual effects (glow, reflection, 3D properties)
+    xml_str = re.sub(r'<w14:glow[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<w14:glow[^>]*>.*?</w14:glow>', '', xml_str, flags=re.I | re.S)
+    xml_str = re.sub(r'<w14:reflection[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<w14:reflection[^>]*>.*?</w14:reflection>', '', xml_str, flags=re.I | re.S)
+    xml_str = re.sub(r'<w14:props3d[^>]*\s*/>', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'<w14:props3d[^>]*>.*?</w14:props3d>', '', xml_str, flags=re.I | re.S)
+    
+    # Remove shadow property references
+    xml_str = re.sub(r'outerShdw', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'innerShdw', '', xml_str, flags=re.I)
+    xml_str = re.sub(r'\s+\w*shdw\w*\s*=\s*"[^"]*"', '', xml_str, flags=re.I)
     
     # Check if anything was changed
     if xml_str == original_xml:
@@ -623,6 +646,20 @@ async def upload_document(file: UploadFile = File(...), title: str = Form(defaul
         if doc_changed:
             replacements["word/document.xml"] = current_doc_xml
 
+    # Process theme files for advanced shadow effects
+    with ZipFile(BytesIO(phase_a_bytes)) as zf:
+        for zip_name in zf.namelist():
+            if 'theme' in zip_name.lower() and zip_name.endswith('.xml'):
+                theme_xml = read_xml_part(phase_a_bytes, zip_name)
+                if theme_xml:
+                    # Remove shadows from theme files
+                    theme_shadows_removed = remove_text_shadow_bytes(theme_xml)
+                    if theme_shadows_removed is not None:
+                        replacements[zip_name] = theme_shadows_removed
+                        if not report["details"]["textShadowsRemoved"]:
+                            report["details"]["textShadowsRemoved"] = True
+                            report["summary"]["fixed"] += 1
+
     final_bytes = write_pkg_xml(phase_a_bytes, replacements)
     tmp_path.unlink(missing_ok=True)
 
@@ -754,6 +791,17 @@ async def download_document(file: UploadFile = File(...)):
         # Save the final result if anything changed
         if doc_changed:
             replacements["word/document.xml"] = current_doc_xml
+
+    # Process theme files for advanced shadow effects (same as upload)
+    with ZipFile(BytesIO(phase_a_bytes)) as zf:
+        for zip_name in zf.namelist():
+            if 'theme' in zip_name.lower() and zip_name.endswith('.xml'):
+                theme_xml = read_xml_part(phase_a_bytes, zip_name)
+                if theme_xml:
+                    # Remove shadows from theme files
+                    theme_shadows_removed = remove_text_shadow_bytes(theme_xml)
+                    if theme_shadows_removed is not None:
+                        replacements[zip_name] = theme_shadows_removed
 
     # Rebuild the file with all fixes (same logic as upload)
     final_bytes = write_pkg_xml(phase_a_bytes, replacements)

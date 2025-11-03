@@ -226,11 +226,20 @@ async function analyzeShadowsAndFonts(zip) {
     hasSmallFonts: false
   };
 
+  // Function to check for all shadow types
+  const hasShadowEffects = (xmlContent) => {
+    return /<[^>]*shadow[^>]*>/i.test(xmlContent) ||
+           /outerShdw|innerShdw/i.test(xmlContent) ||
+           /<a:outerShdw|<a:innerShdw|<a:prstShdw/i.test(xmlContent) ||
+           /<w14:shadow|<w15:shadow/i.test(xmlContent) ||
+           /<w14:glow|<w14:reflection|<w14:props3d/i.test(xmlContent);
+  };
+
   // Check document.xml for shadows, fonts, and sizes
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (documentXml) {
-    // Check for shadows
-    if (/<[^>]*shadow[^>]*>/i.test(documentXml)) {
+    // Check for all shadow types
+    if (hasShadowEffects(documentXml)) {
       results.hasShadows = true;
     }
     
@@ -255,7 +264,7 @@ async function analyzeShadowsAndFonts(zip) {
   // Check styles.xml for shadows, fonts, and sizes
   const stylesXml = await zip.file('word/styles.xml')?.async('string');
   if (stylesXml) {
-    if (!results.hasShadows && /<[^>]*shadow[^>]*>/i.test(stylesXml)) {
+    if (!results.hasShadows && hasShadowEffects(stylesXml)) {
       results.hasShadows = true;
     }
     
@@ -272,6 +281,21 @@ async function analyzeShadowsAndFonts(zip) {
             results.hasSmallFonts = true;
             break;
           }
+        }
+      }
+    }
+  }
+
+  // Check theme files for advanced shadow effects
+  if (!results.hasShadows) {
+    const themeFiles = Object.keys(zip.files).filter(name => name.includes('theme') && name.endsWith('.xml'));
+    for (const themeFileName of themeFiles) {
+      const themeFile = zip.file(themeFileName);
+      if (themeFile) {
+        const themeXml = await themeFile.async('string');
+        if (hasShadowEffects(themeXml)) {
+          results.hasShadows = true;
+          break;
         }
       }
     }

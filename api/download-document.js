@@ -153,6 +153,17 @@ async function remediateDocx(fileData, filename) {
       zip.file('word/styles.xml', stylesXml);
     }
     
+    // Fix 6: Remove advanced shadows from theme files
+    const themeFiles = Object.keys(zip.files).filter(name => name.includes('theme') && name.endsWith('.xml'));
+    for (const themeFileName of themeFiles) {
+      const themeFile = zip.file(themeFileName);
+      if (themeFile) {
+        let themeXml = await themeFile.async('string');
+        themeXml = removeShadowsAndNormalizeFonts(themeXml);
+        zip.file(themeFileName, themeXml);
+      }
+    }
+    
     // Generate the remediated DOCX file
     const remediatedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     return remediatedBuffer;
@@ -252,18 +263,45 @@ function fixHeadings(documentXml) {
 function removeShadowsAndNormalizeFonts(xmlContent) {
   let fixedXml = xmlContent;
   
-  // 1. Remove text shadows
+  // 1. Remove basic Word text shadows
   fixedXml = fixedXml.replace(/<w:shadow\s*\/>/g, '');
   fixedXml = fixedXml.replace(/<w:shadow[^>]*>.*?<\/w:shadow>/g, '');
   fixedXml = fixedXml.replace(/\s+\w*shadow\w*\s*=\s*"[^"]*"/g, '');
   
-  // 2. Normalize fonts to Arial (sans-serif)
+  // 2. Remove advanced DrawingML shadow effects
+  fixedXml = fixedXml.replace(/<a:outerShdw[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<a:outerShdw[^>]*>.*?<\/a:outerShdw>/g, '');
+  fixedXml = fixedXml.replace(/<a:innerShdw[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<a:innerShdw[^>]*>.*?<\/a:innerShdw>/g, '');
+  fixedXml = fixedXml.replace(/<a:prstShdw[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<a:prstShdw[^>]*>.*?<\/a:prstShdw>/g, '');
+  
+  // 3. Remove Office 2010+ shadow effects
+  fixedXml = fixedXml.replace(/<w14:shadow[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w14:shadow[^>]*>.*?<\/w14:shadow>/g, '');
+  fixedXml = fixedXml.replace(/<w15:shadow[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w15:shadow[^>]*>.*?<\/w15:shadow>/g, '');
+  
+  // 4. Remove shadow-related text effects and 3D properties
+  fixedXml = fixedXml.replace(/<w14:glow[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w14:glow[^>]*>.*?<\/w14:glow>/g, '');
+  fixedXml = fixedXml.replace(/<w14:reflection[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w14:reflection[^>]*>.*?<\/w14:reflection>/g, '');
+  fixedXml = fixedXml.replace(/<w14:props3d[^>]*\/>/g, '');
+  fixedXml = fixedXml.replace(/<w14:props3d[^>]*>.*?<\/w14:props3d>/g, '');
+  
+  // 5. Remove shadow properties and attributes
+  fixedXml = fixedXml.replace(/outerShdw/g, '');
+  fixedXml = fixedXml.replace(/innerShdw/g, '');
+  fixedXml = fixedXml.replace(/\s+\w*shdw\w*\s*=\s*"[^"]*"/g, '');
+  
+  // 6. Normalize fonts to Arial (sans-serif)
   fixedXml = fixedXml.replace(
     /<w:rFonts[^>]*\/?>/g,
     '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:eastAsia="Arial"/>'
   );
   
-  // 3. Ensure minimum font size of 22 half-points (11pt)
+  // 7. Ensure minimum font size of 22 half-points (11pt)
   fixedXml = fixedXml.replace(
     /<w:sz w:val="(\d+)"\s*\/>/g,
     (match, size) => {
@@ -275,7 +313,7 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
     }
   );
   
-  // 4. Same for complex script font sizes
+  // 8. Same for complex script font sizes
   fixedXml = fixedXml.replace(
     /<w:szCs w:val="(\d+)"\s*\/>/g,
     (match, size) => {
