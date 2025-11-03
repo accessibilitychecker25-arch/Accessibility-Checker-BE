@@ -124,13 +124,17 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
-    // Fix 3: Remove document protection
+    // Fix 3: Remove document protection / write-protection / read-only recommendation
     const settingsXmlFile = zip.file('word/settings.xml');
     if (settingsXmlFile) {
       let settingsXml = await settingsXmlFile.async('string');
-      // Remove document protection element if it exists
+      // Remove documentProtection, writeProtection and readOnlyRecommended elements if they exist
       settingsXml = settingsXml.replace(/<w:documentProtection[^>]*\/>/g, '');
       settingsXml = settingsXml.replace(/<w:documentProtection[^>]*>[\s\S]*?<\/w:documentProtection>/g, '');
+      settingsXml = settingsXml.replace(/<w:writeProtection[^>]*\/>/g, '');
+      settingsXml = settingsXml.replace(/<w:writeProtection[^>]*>[\s\S]*?<\/w:writeProtection>/g, '');
+      settingsXml = settingsXml.replace(/<w:readOnlyRecommended[^>]*\/>/g, '');
+      settingsXml = settingsXml.replace(/<w:readOnlyRecommended[^>]*>[\s\S]*?<\/w:readOnlyRecommended>/g, '');
       zip.file('word/settings.xml', settingsXml);
     }
     

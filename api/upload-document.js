@@ -150,10 +150,14 @@ async function analyzeDocx(fileData, filename) {
       }
     }
     
-    // Check for document protection
+    // Check for document protection (documentProtection, writeProtection, readOnlyRecommended)
     const settingsXml = await zip.file('word/settings.xml')?.async('string');
     if (settingsXml) {
-      if (settingsXml.includes('<w:documentProtection')) {
+      if (
+        settingsXml.includes('<w:documentProtection') ||
+        settingsXml.includes('<w:writeProtection') ||
+        settingsXml.includes('<w:readOnlyRecommended')
+      ) {
         report.details.documentProtected = true;
         report.summary.flagged += 1;
       }

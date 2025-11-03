@@ -154,10 +154,15 @@ def remove_protection_bytes(orig_xml: bytes) -> Optional[bytes]:
     print(orig_xml)
     root = etree.fromstring(orig_xml)
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    prot = root.find("w:documentProtection", ns)
-    if prot is None:
+    # Remove documentProtection, writeProtection and readOnlyRecommended if present
+    removed = False
+    for tag in ("documentProtection", "writeProtection", "readOnlyRecommended"):
+        el = root.find(f"w:{tag}", ns)
+        if el is not None:
+            el.getparent().remove(el)
+            removed = True
+    if not removed:
         return None
-    prot.getparent().remove(prot)
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
 
 def set_default_lang_en_us_bytes(orig_xml: bytes) -> Optional[bytes]:
