@@ -228,19 +228,26 @@ async function analyzeShadowsAndFonts(zip) {
     hasSmallFonts: false
   };
 
+  // Track which parts triggered shadow detection for debugging/accuracy
+  results.shadowParts = [];
+
   // Function to check for shadow tags only (conservative, avoids false positives)
+  // Returns the matched tag string or null
   const hasShadowEffects = (xmlContent) => {
-    if (!xmlContent) return false;
-    const tagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw|glow|reflection|props3d)\b/i;
-    return tagRegex.test(xmlContent);
+    if (!xmlContent) return null;
+    const tagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw|glow|reflection|props3d)\b[^>]*>/i;
+    const m = xmlContent.match(tagRegex);
+    return m ? m[0] : null;
   };
 
   // Check document.xml for shadows, fonts, and sizes
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (documentXml) {
     // Check for all shadow types
-    if (hasShadowEffects(documentXml)) {
+    const m = hasShadowEffects(documentXml);
+    if (m) {
       results.hasShadows = true;
+      results.shadowParts.push({ part: 'word/document.xml', match: m.slice(0, 200) });
     }
     
     // Check for serif fonts (Times, Times New Roman, Georgia, etc.)
@@ -264,8 +271,10 @@ async function analyzeShadowsAndFonts(zip) {
   // Check styles.xml for shadows, fonts, and sizes
   const stylesXml = await zip.file('word/styles.xml')?.async('string');
   if (stylesXml) {
-    if (!results.hasShadows && hasShadowEffects(stylesXml)) {
+    const m = hasShadowEffects(stylesXml);
+    if (!results.hasShadows && m) {
       results.hasShadows = true;
+      results.shadowParts.push({ part: 'word/styles.xml', match: m.slice(0, 200) });
     }
     
     if (!results.hasSerifFonts && /(Times|Georgia|Garamond|serif)/i.test(stylesXml)) {
@@ -293,8 +302,10 @@ async function analyzeShadowsAndFonts(zip) {
       const themeFile = zip.file(themeFileName);
       if (themeFile) {
         const themeXml = await themeFile.async('string');
-        if (hasShadowEffects(themeXml)) {
+        const m = hasShadowEffects(themeXml);
+        if (m) {
           results.hasShadows = true;
+          results.shadowParts.push({ part: themeFileName, match: m.slice(0, 200) });
           break;
         }
       }
