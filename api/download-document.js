@@ -128,17 +128,35 @@ async function remediateDocx(fileData, filename) {
       writeIfChanged('word/styles.xml', stylesXml, newStyles);
     }
     
-    // Fix 3: Remove document protection / write-protection / read-only recommendation and edit locks
+    // Fix 3: Remove ALL document protection / write-protection / read-only recommendation and edit locks
     const settingsXmlFile = zip.file('word/settings.xml');
     if (settingsXmlFile) {
       let settingsXml = await settingsXmlFile.async('string');
       let newSettings = settingsXml;
-      // Remove known protection elements if they exist (covers several Office variants)
-      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '');
-      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '');
-      // Remove any standalone <w:locked/> elements and any w:locked attributes that may enforce locking
+      
+      // Remove all known protection elements (comprehensive list for all Office variants)
+      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)>/g, '');
+      
+      // Remove locking elements and attributes
       newSettings = newSettings.replace(/<w:locked[^>]*\/>/g, '');
       newSettings = newSettings.replace(/\s?w:locked="[^"]*"/g, '');
+      
+      // Remove enforcement and password-related elements
+      newSettings = newSettings.replace(/<w:enforcement[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:enforcement[^>]*>[\s\S]*?<\/w:enforcement>/g, '');
+      
+      // Remove any hash/salt protection elements
+      newSettings = newSettings.replace(/<w:cryptProviderType[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:cryptAlgorithmClass[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:cryptAlgorithmType[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:cryptAlgorithmSid[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:cryptSpinCount[^>]*\/>/g, '');
+      
+      // Ensure trackRevisions is disabled
+      newSettings = newSettings.replace(/<w:trackRevisions[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/\s?w:trackRevisions="[^"]*"/g, '');
+      
       writeIfChanged('word/settings.xml', settingsXml, newSettings);
     }
     
@@ -177,24 +195,49 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
-    // Final safety pass: ensure settings.xml contains no protection tags
+    // Final safety pass: ensure settings.xml contains NO protection tags whatsoever
     try {
       const settingsFinalFile = zip.file('word/settings.xml');
       if (settingsFinalFile) {
         const origSettings = await settingsFinalFile.async('string');
-        const hasProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)\b/.test(origSettings);
-        if (hasProt) {
-          console.log('[remediateDocx] found protection in settings.xml during final pass — removing');
-          const cleaned = origSettings
-            .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '')
-            .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '')
-            .replace(/<w:locked[^>]*\/>/g, '')
-            .replace(/\s?w:locked="[^"]*"/g, '');
+        const hasAnyProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection|enforcement|locked|trackRevisions|crypt)\b/.test(origSettings);
+        if (hasAnyProt) {
+          console.log('[remediateDocx] found protection in settings.xml during final pass — removing ALL protection');
+          let cleaned = origSettings;
+          
+          // Remove all protection-related elements (comprehensive final cleanup)
+          cleaned = cleaned.replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)[^>]*\/>/g, '');
+          cleaned = cleaned.replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)>/g, '');
+          cleaned = cleaned.replace(/<w:(?:enforcement|locked|trackRevisions)[^>]*\/>/g, '');
+          cleaned = cleaned.replace(/<w:(?:enforcement|locked|trackRevisions)[^>]*>[\s\S]*?<\/w:(?:enforcement|locked|trackRevisions)>/g, '');
+          cleaned = cleaned.replace(/<w:crypt[^>]*\/>/g, '');
+          cleaned = cleaned.replace(/<w:crypt[^>]*>[\s\S]*?<\/w:crypt[^>]*>/g, '');
+          cleaned = cleaned.replace(/\s?w:(?:locked|trackRevisions|enforcement)="[^"]*"/g, '');
+          
           writeIfChanged('word/settings.xml', origSettings, cleaned);
         }
       }
     } catch (e) {
       console.warn('[remediateDocx] final protection-clean pass failed', e && e.stack ? e.stack : e);
+    }
+
+    // Also ensure document.xml has no section-level protection
+    try {
+      const docFile = zip.file('word/document.xml');
+      if (docFile) {
+        const origDoc = await docFile.async('string');
+        const hasSectionProt = /<w:sectPrChange[^>]*>[\s\S]*?<w:sectPr[^>]*>[\s\S]*?<w:formProt[^>]*\/?>[\s\S]*?<\/w:sectPr>[\s\S]*?<\/w:sectPrChange>/g.test(origDoc) ||
+                              /<w:sectPr[^>]*>[\s\S]*?<w:formProt[^>]*\/?>/g.test(origDoc);
+        if (hasSectionProt) {
+          console.log('[remediateDocx] removing section-level form protection from document.xml');
+          let cleanedDoc = origDoc;
+          cleanedDoc = cleanedDoc.replace(/<w:formProt[^>]*\/>/g, '');
+          cleanedDoc = cleanedDoc.replace(/<w:formProt[^>]*>[\s\S]*?<\/w:formProt>/g, '');
+          writeIfChanged('word/document.xml', origDoc, cleanedDoc);
+        }
+      }
+    } catch (e) {
+      console.warn('[remediateDocx] section protection cleanup failed', e && e.stack ? e.stack : e);
     }
 
     // Generate the remediated DOCX file
