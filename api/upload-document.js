@@ -99,12 +99,12 @@ async function analyzeDocx(fileData, filename) {
   try {
     const zip = await JSZip.loadAsync(fileData);
     
-    // Check title
+    // Check title - gets fixed during download
     const coreXml = await zip.file('docProps/core.xml')?.async('string');
     if (coreXml) {
       if (coreXml.includes('<dc:title></dc:title>') || coreXml.includes('<dc:title/>')) {
         report.details.titleNeedsFixing = true;
-        report.summary.flagged += 1;
+        report.summary.fixed += 1;
       }
     }
     
@@ -167,7 +167,7 @@ async function analyzeDocx(fileData, filename) {
         settingsXml.includes('<w:locked')
       ) {
         report.details.documentProtected = true;
-        report.summary.flagged += 1;
+        report.summary.fixed += 1;
       }
     }
     
@@ -183,15 +183,15 @@ async function analyzeDocx(fileData, filename) {
       // ensure falsey/empty detection doesn't report a fix
       report.details.textShadowsRemoved = false;
     }
-    if (shadowFontResults.hasSerifFonts || shadowFontResults.hasSmallFonts) {
-      if (shadowFontResults.hasSerifFonts) {
-        report.details.fontsNormalized = true;
-      }
-      if (shadowFontResults.hasSmallFonts) {
-        report.details.fontSizesNormalized = true;
-      }
+    if (shadowFontResults.hasSerifFonts) {
+      report.details.fontsNormalized = true;
       report.summary.fixed += 1;
-      console.log('[analyzeDocx] fonts/sizes detected, fix count now:', report.summary.fixed);
+      console.log('[analyzeDocx] serif fonts detected, fix count now:', report.summary.fixed);
+    }
+    if (shadowFontResults.hasSmallFonts) {
+      report.details.fontSizesNormalized = true;
+      report.summary.fixed += 1;
+      console.log('[analyzeDocx] small fonts detected, fix count now:', report.summary.fixed);
     }
     
     console.log('[analyzeDocx] FINAL fix count before return:', report.summary.fixed);
