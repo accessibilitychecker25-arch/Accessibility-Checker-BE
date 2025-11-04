@@ -99,12 +99,12 @@ async function analyzeDocx(fileData, filename) {
   try {
     const zip = await JSZip.loadAsync(fileData);
     
-    // Check title - gets fixed during download
+    // Check title - requires user action to fix
     const coreXml = await zip.file('docProps/core.xml')?.async('string');
     if (coreXml) {
       if (coreXml.includes('<dc:title></dc:title>') || coreXml.includes('<dc:title/>')) {
         report.details.titleNeedsFixing = true;
-        report.summary.fixed += 1;
+        report.summary.flagged += 1;
       }
     }
     
