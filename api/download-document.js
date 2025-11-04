@@ -7,7 +7,6 @@ module.exports = async (req, res) => {
   // which the browser will reject.
   const ALLOWED_ORIGINS = [
     'https://accessibilitychecker25-arch.github.io',
-    'https://kmoreland126.github.io',
     'http://localhost:3000',
     'http://localhost:4200'
   ];
@@ -164,6 +163,26 @@ async function remediateDocx(fileData, filename) {
       }
     }
     
+    // Final safety pass: ensure settings.xml contains no protection tags
+    try {
+      const settingsFinalFile = zip.file('word/settings.xml');
+      if (settingsFinalFile) {
+        let settingsFinal = await settingsFinalFile.async('string');
+        const hasProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)\b/.test(settingsFinal);
+        if (hasProt) {
+          console.log('[remediateDocx] found protection in settings.xml during final pass — removing');
+          settingsFinal = settingsFinal
+            .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '')
+            .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '')
+            .replace(/<w:locked[^>]*\/>/g, '')
+            .replace(/\s?w:locked="[^"]*"/g, '');
+          zip.file('word/settings.xml', settingsFinal);
+        }
+      }
+    } catch (e) {
+      console.warn('[remediateDocx] final protection-clean pass failed', e && e.stack ? e.stack : e);
+    }
+
     // Generate the remediated DOCX file
     const remediatedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     return remediatedBuffer;
