@@ -173,9 +173,15 @@ async function analyzeDocx(fileData, filename) {
     
     // Check for text shadows, serif fonts, and small font sizes
     const shadowFontResults = await analyzeShadowsAndFonts(zip);
-    if (shadowFontResults.hasShadows) {
+    // attach debug info about which parts contained shadow tags (if any)
+    if (shadowFontResults && Array.isArray(shadowFontResults.shadowParts) && shadowFontResults.shadowParts.length > 0) {
+      report.details.shadowParts = shadowFontResults.shadowParts;
       report.details.textShadowsRemoved = true;
       report.summary.fixed += 1;
+      console.log('[analyzeDocx] shadows detected in parts:', shadowFontResults.shadowParts.map(s => s.part));
+    } else {
+      // ensure falsey/empty detection doesn't report a fix
+      report.details.textShadowsRemoved = false;
     }
     if (shadowFontResults.hasSerifFonts || shadowFontResults.hasSmallFonts) {
       report.details.fontsNormalized = true;
