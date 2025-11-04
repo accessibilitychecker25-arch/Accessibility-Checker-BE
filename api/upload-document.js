@@ -178,7 +178,7 @@ async function analyzeDocx(fileData, filename) {
       report.details.shadowParts = shadowFontResults.shadowParts;
       report.details.textShadowsRemoved = true;
       report.summary.fixed += 1;
-      console.log('[analyzeDocx] shadows detected in parts:', shadowFontResults.shadowParts.map(s => s.part));
+      console.log('[analyzeDocx] shadows detected, fix count now:', report.summary.fixed);
     } else {
       // ensure falsey/empty detection doesn't report a fix
       report.details.textShadowsRemoved = false;
@@ -191,7 +191,10 @@ async function analyzeDocx(fileData, filename) {
         report.details.fontSizesNormalized = true;
       }
       report.summary.fixed += 1;
+      console.log('[analyzeDocx] fonts/sizes detected, fix count now:', report.summary.fixed);
     }
+    
+    console.log('[analyzeDocx] FINAL fix count before return:', report.summary.fixed);
     
     // Scan for any remaining suspicious protection/encryption markers to help debug Protected View
     try {
