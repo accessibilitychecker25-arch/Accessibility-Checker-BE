@@ -131,36 +131,7 @@ async function analyzeDocx(fileData, filename) {
       report.summary.flagged += gifFiles.length;
     }
 
-    // Detect text shadows in document parts (styles, document body, theme files)
-    // Use a conservative tag-only regex to avoid false positives from unrelated text
-    const shadowTagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw)\b/i;
-    let shadowsFound = false;
-
-    const stylesXmlStr = await zip.file('word/styles.xml')?.async('string');
-    if (stylesXmlStr && shadowTagRegex.test(stylesXmlStr)) {
-      shadowsFound = true;
-    }
-
-    const documentXmlStr = await zip.file('word/document.xml')?.async('string');
-    if (!shadowsFound && documentXmlStr && shadowTagRegex.test(documentXmlStr)) {
-      shadowsFound = true;
-    }
-
-    if (!shadowsFound) {
-      const themeFiles = Object.keys(zip.files).filter(name => name.toLowerCase().includes('theme') && name.endsWith('.xml'));
-      for (const tname of themeFiles) {
-        const tstr = await zip.file(tname).async('string');
-        if (tstr && shadowTagRegex.test(tstr)) {
-          shadowsFound = true;
-          break;
-        }
-      }
-    }
-
-    if (shadowsFound) {
-      report.details.textShadowsRemoved = true;
-      report.summary.fixed += 1;
-    }
+    // Shadow detection deferred to analyzeShadowsAndFonts (single source of truth)
     
     // Check filename
     if (filename.includes('_') || filename.toLowerCase().startsWith('document') || filename.toLowerCase().startsWith('untitled')) {
@@ -257,13 +228,11 @@ async function analyzeShadowsAndFonts(zip) {
     hasSmallFonts: false
   };
 
-  // Function to check for all shadow types
+  // Function to check for shadow tags only (conservative, avoids false positives)
   const hasShadowEffects = (xmlContent) => {
-    return /<[^>]*shadow[^>]*>/i.test(xmlContent) ||
-           /outerShdw|innerShdw/i.test(xmlContent) ||
-           /<a:outerShdw|<a:innerShdw|<a:prstShdw/i.test(xmlContent) ||
-           /<w14:shadow|<w15:shadow/i.test(xmlContent) ||
-           /<w14:glow|<w14:reflection|<w14:props3d/i.test(xmlContent);
+    if (!xmlContent) return false;
+    const tagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw|glow|reflection|props3d)\b/i;
+    return tagRegex.test(xmlContent);
   };
 
   // Check document.xml for shadows, fonts, and sizes
