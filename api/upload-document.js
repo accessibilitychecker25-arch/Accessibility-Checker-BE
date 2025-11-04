@@ -132,34 +132,25 @@ async function analyzeDocx(fileData, filename) {
     }
 
     // Detect text shadows in document parts (styles, document body, theme files)
-    const shadowRegex = /(<w:shadow\b|<a:outerShdw\b|<a:innerShdw\b|<a:prstShdw\b|<w14:shadow\b|<w15:shadow\b|\bshdw\b)/i;
+    // Use a conservative tag-only regex to avoid false positives from unrelated text
+    const shadowTagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw)\b/i;
     let shadowsFound = false;
 
     const stylesXmlStr = await zip.file('word/styles.xml')?.async('string');
-    if (stylesXmlStr && shadowRegex.test(stylesXmlStr)) {
+    if (stylesXmlStr && shadowTagRegex.test(stylesXmlStr)) {
       shadowsFound = true;
     }
 
     const documentXmlStr = await zip.file('word/document.xml')?.async('string');
-    if (!shadowsFound && documentXmlStr && shadowRegex.test(documentXmlStr)) {
+    if (!shadowsFound && documentXmlStr && shadowTagRegex.test(documentXmlStr)) {
       shadowsFound = true;
     }
 
     if (!shadowsFound) {
-      zip.forEach((relativePath, file) => {
-        if (!shadowsFound && relativePath.toLowerCase().includes('theme') && relativePath.endsWith('.xml')) {
-          // synchronous? use async read inside an IIFE-ish pattern: but JSZip.forEach provides file object
-          const f = zip.file(relativePath);
-          if (f) {
-            // read synchronously using async/await not allowed here, so mark for later by pushing promise
-          }
-        }
-      });
-      // As a simple fallback, check file names for theme files and read them
       const themeFiles = Object.keys(zip.files).filter(name => name.toLowerCase().includes('theme') && name.endsWith('.xml'));
       for (const tname of themeFiles) {
         const tstr = await zip.file(tname).async('string');
-        if (tstr && shadowRegex.test(tstr)) {
+        if (tstr && shadowTagRegex.test(tstr)) {
           shadowsFound = true;
           break;
         }
