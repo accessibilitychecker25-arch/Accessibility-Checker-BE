@@ -239,8 +239,19 @@ async function analyzeShadowsAndFonts(zip) {
 
   // Function to check for shadow tags only (conservative, avoids false positives)
   // Returns the matched tag string or null
-  const hasShadowEffects = (xmlContent) => {
+  // Excludes theme-level shadows that don't represent actual text shadow formatting
+  const hasShadowEffects = (xmlContent, partName = '') => {
     if (!xmlContent) return null;
+    
+    // For theme files, only check for direct text shadow elements, not default theme shadows
+    if (partName.toLowerCase().includes('theme')) {
+      // Only match w14/w15 text effect shadows in themes, not default a:outerShdw
+      const themeTextShadowRegex = /<\s*(?:w14|w15):(?:shadow|glow|reflection|props3d)\b[^>]*>/i;
+      const m = xmlContent.match(themeTextShadowRegex);
+      return m ? m[0] : null;
+    }
+    
+    // For document/styles, check all shadow types including DrawingML
     const tagRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw|glow|reflection|props3d)\b[^>]*>/i;
     const m = xmlContent.match(tagRegex);
     return m ? m[0] : null;
@@ -250,7 +261,7 @@ async function analyzeShadowsAndFonts(zip) {
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (documentXml) {
     // Check for all shadow types
-    const m = hasShadowEffects(documentXml);
+    const m = hasShadowEffects(documentXml, 'word/document.xml');
     if (m) {
       results.hasShadows = true;
       results.shadowParts.push({ part: 'word/document.xml', match: m.slice(0, 200) });
@@ -277,7 +288,7 @@ async function analyzeShadowsAndFonts(zip) {
   // Check styles.xml for shadows, fonts, and sizes
   const stylesXml = await zip.file('word/styles.xml')?.async('string');
   if (stylesXml) {
-    const m = hasShadowEffects(stylesXml);
+    const m = hasShadowEffects(stylesXml, 'word/styles.xml');
     if (!results.hasShadows && m) {
       results.hasShadows = true;
       results.shadowParts.push({ part: 'word/styles.xml', match: m.slice(0, 200) });
@@ -308,7 +319,7 @@ async function analyzeShadowsAndFonts(zip) {
       const themeFile = zip.file(themeFileName);
       if (themeFile) {
         const themeXml = await themeFile.async('string');
-        const m = hasShadowEffects(themeXml);
+        const m = hasShadowEffects(themeXml, themeFileName);
         if (m) {
           results.hasShadows = true;
           results.shadowParts.push({ part: themeFileName, match: m.slice(0, 200) });
