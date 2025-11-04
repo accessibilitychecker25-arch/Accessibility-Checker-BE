@@ -184,8 +184,12 @@ async function analyzeDocx(fileData, filename) {
       report.details.textShadowsRemoved = false;
     }
     if (shadowFontResults.hasSerifFonts || shadowFontResults.hasSmallFonts) {
-      report.details.fontsNormalized = true;
-      report.details.fontSizesNormalized = true;
+      if (shadowFontResults.hasSerifFonts) {
+        report.details.fontsNormalized = true;
+      }
+      if (shadowFontResults.hasSmallFonts) {
+        report.details.fontSizesNormalized = true;
+      }
       report.summary.fixed += 1;
     }
     
