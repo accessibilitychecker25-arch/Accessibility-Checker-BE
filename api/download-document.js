@@ -84,6 +84,12 @@ module.exports = async (req, res) => {
 async function remediateDocx(fileData, filename) {
   try {
     const zip = await JSZip.loadAsync(fileData);
+    // helper: write to zip only if content actually changed
+    const writeIfChanged = (name, originalStr, updatedStr) => {
+      if (typeof updatedStr === 'string' && updatedStr !== originalStr) {
+        zip.file(name, updatedStr);
+      }
+    };
     
     // Create a clean title from the filename (remove extension, replace special chars)
     const cleanTitle = filename
@@ -97,59 +103,65 @@ async function remediateDocx(fileData, filename) {
     const coreXmlFile = zip.file('docProps/core.xml');
     if (coreXmlFile) {
       let coreXml = await coreXmlFile.async('string');
-      // Always update title to match the clean filename
-      coreXml = coreXml.replace(
+      const newCore = coreXml.replace(
         /<dc:title>.*?<\/dc:title>|<dc:title\/>/,
         `<dc:title>${cleanTitle}</dc:title>`
       );
-      zip.file('docProps/core.xml', coreXml);
+      writeIfChanged('docProps/core.xml', coreXml, newCore);
     }
     
     // Fix 2: Set default language to en-US in styles
     const stylesXmlFile = zip.file('word/styles.xml');
     if (stylesXmlFile) {
       let stylesXml = await stylesXmlFile.async('string');
-      
+      let newStyles = stylesXml;
       // Check if language is already set
       if (!stylesXml.includes('w:lang w:val="en-US"')) {
         // Find docDefaults section and add language
         if (stylesXml.includes('<w:docDefaults>')) {
-          stylesXml = stylesXml.replace(
+          newStyles = newStyles.replace(
             /<w:docDefaults>/,
             '<w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US"/></w:rPr></w:rPrDefault>'
           );
         }
-        zip.file('word/styles.xml', stylesXml);
       }
+      writeIfChanged('word/styles.xml', stylesXml, newStyles);
     }
     
     // Fix 3: Remove document protection / write-protection / read-only recommendation and edit locks
     const settingsXmlFile = zip.file('word/settings.xml');
     if (settingsXmlFile) {
       let settingsXml = await settingsXmlFile.async('string');
+      let newSettings = settingsXml;
       // Remove known protection elements if they exist (covers several Office variants)
-      settingsXml = settingsXml.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '');
-      settingsXml = settingsXml.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '');
+      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/<w:(documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '');
       // Remove any standalone <w:locked/> elements and any w:locked attributes that may enforce locking
-      settingsXml = settingsXml.replace(/<w:locked[^>]*\/>/g, '');
-      settingsXml = settingsXml.replace(/\s?w:locked=\"[^\"]*\"/g, '');
-      zip.file('word/settings.xml', settingsXml);
+      newSettings = newSettings.replace(/<w:locked[^>]*\/>/g, '');
+      newSettings = newSettings.replace(/\s?w:locked="[^"]*"/g, '');
+      writeIfChanged('word/settings.xml', settingsXml, newSettings);
     }
     
     // Fix 4: Remove text shadows and normalize fonts/sizes
     const documentXmlFile = zip.file('word/document.xml');
     if (documentXmlFile) {
-      let documentXml = await documentXmlFile.async('string');
-      documentXml = fixHeadings(documentXml);
-      documentXml = removeShadowsAndNormalizeFonts(documentXml);
-      zip.file('word/document.xml', documentXml);
+      const origDocXml = await documentXmlFile.async('string');
+      const afterHeadings = fixHeadings(origDocXml);
+      const afterShadows = removeShadowsAndNormalizeFonts(afterHeadings);
+      if (afterShadows !== null) {
+        writeIfChanged('word/document.xml', origDocXml, afterShadows);
+      } else if (afterHeadings !== origDocXml) {
+        writeIfChanged('word/document.xml', origDocXml, afterHeadings);
+      }
     }
 
     // Fix 5: Apply same shadow/font fixes to styles.xml
     if (stylesXmlFile) {
-      let stylesXml = await stylesXmlFile.async('string');
-      stylesXml = removeShadowsAndNormalizeFonts(stylesXml);
-      zip.file('word/styles.xml', stylesXml);
+      const origStylesXml = await stylesXmlFile.async('string');
+      const afterStylesShadows = removeShadowsAndNormalizeFonts(origStylesXml);
+      if (afterStylesShadows !== null) {
+        writeIfChanged('word/styles.xml', origStylesXml, afterStylesShadows);
+      }
     }
     
     // Fix 6: Remove advanced shadows from theme files
@@ -157,9 +169,11 @@ async function remediateDocx(fileData, filename) {
     for (const themeFileName of themeFiles) {
       const themeFile = zip.file(themeFileName);
       if (themeFile) {
-        let themeXml = await themeFile.async('string');
-        themeXml = removeShadowsAndNormalizeFonts(themeXml);
-        zip.file(themeFileName, themeXml);
+        const origThemeXml = await themeFile.async('string');
+        const afterTheme = removeShadowsAndNormalizeFonts(origThemeXml);
+        if (afterTheme !== null) {
+          writeIfChanged(themeFileName, origThemeXml, afterTheme);
+        }
       }
     }
     
@@ -167,16 +181,16 @@ async function remediateDocx(fileData, filename) {
     try {
       const settingsFinalFile = zip.file('word/settings.xml');
       if (settingsFinalFile) {
-        let settingsFinal = await settingsFinalFile.async('string');
-        const hasProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)\b/.test(settingsFinal);
+        const origSettings = await settingsFinalFile.async('string');
+        const hasProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)\b/.test(origSettings);
         if (hasProt) {
           console.log('[remediateDocx] found protection in settings.xml during final pass — removing');
-          settingsFinal = settingsFinal
+          const cleaned = origSettings
             .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*\/>/g, '')
             .replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)[^>]*>[\s\S]*?<\/w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection)>/g, '')
             .replace(/<w:locked[^>]*\/>/g, '')
             .replace(/\s?w:locked="[^"]*"/g, '');
-          zip.file('word/settings.xml', settingsFinal);
+          writeIfChanged('word/settings.xml', origSettings, cleaned);
         }
       }
     } catch (e) {
@@ -280,6 +294,7 @@ function fixHeadings(documentXml) {
 }
 
 function removeShadowsAndNormalizeFonts(xmlContent) {
+  const original = xmlContent;
   let fixedXml = xmlContent;
   
   // 1. Remove basic Word text shadows
@@ -344,5 +359,7 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
     }
   );
   
+  // If nothing changed, return null so callers can avoid rewriting the part
+  if (fixedXml === original) return null;
   return fixedXml;
 }
