@@ -367,9 +367,8 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
   fixedXml = fixedXml.replace(/<w14:props3d[^>]*\/>/g, '');
   fixedXml = fixedXml.replace(/<w14:props3d[^>]*>.*?<\/w14:props3d>/g, '');
   
-  // 5. Remove shadow properties and attributes
-  fixedXml = fixedXml.replace(/outerShdw/g, '');
-  fixedXml = fixedXml.replace(/innerShdw/g, '');
+  // 5. Remove shadow properties and attributes (safely)
+  // Remove only within attribute values, not entire element names
   fixedXml = fixedXml.replace(/\s+\w*shdw\w*\s*=\s*"[^"]*"/g, '');
   
   // 6. Normalize fonts to Arial (sans-serif)
