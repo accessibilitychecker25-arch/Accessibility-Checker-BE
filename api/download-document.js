@@ -240,8 +240,12 @@ async function remediateDocx(fileData, filename) {
       console.warn('[remediateDocx] section protection cleanup failed', e && e.stack ? e.stack : e);
     }
 
-    // Generate the remediated DOCX file
-    const remediatedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+    // Generate the remediated DOCX file with proper compression
+    const remediatedBuffer = await zip.generateAsync({ 
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
     return remediatedBuffer;
     
   } catch (error) {
@@ -371,11 +375,11 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
   // Remove only within attribute values, not entire element names
   fixedXml = fixedXml.replace(/\s+\w*shdw\w*\s*=\s*"[^"]*"/g, '');
   
-  // 6. Normalize fonts to Arial (sans-serif)
-  fixedXml = fixedXml.replace(
-    /<w:rFonts[^>]*\/?>/g,
-    '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:eastAsia="Arial"/>'
-  );
+  // 6. Normalize fonts to Arial (sans-serif) - surgically replace font names
+  fixedXml = fixedXml.replace(/w:ascii="[^"]*"/g, 'w:ascii="Arial"');
+  fixedXml = fixedXml.replace(/w:hAnsi="[^"]*"/g, 'w:hAnsi="Arial"');
+  fixedXml = fixedXml.replace(/w:cs="[^"]*"/g, 'w:cs="Arial"');
+  fixedXml = fixedXml.replace(/w:eastAsia="[^"]*"/g, 'w:eastAsia="Arial"');
   
   // 7. Ensure minimum font size of 22 half-points (11pt)
   fixedXml = fixedXml.replace(
