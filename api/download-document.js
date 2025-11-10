@@ -83,15 +83,11 @@ module.exports = async (req, res) => {
 
 async function remediateDocx(fileData, filename) {
   try {
-    console.log('[remediateDocx] Starting remediation for:', filename);
-    
     const zip = await JSZip.loadAsync(fileData);
-    console.log('[remediateDocx] ZIP loaded successfully');
     
     // Helper function to write only if content changed
     const writeIfChanged = (filename, original, modified) => {
       if (original !== modified && modified !== null) {
-        console.log(`[writeIfChanged] ${filename} changed (${original?.length || 0} → ${modified?.length || 0} chars)`);
         zip.file(filename, modified);
         return true;
       }
@@ -102,7 +98,6 @@ async function remediateDocx(fileData, filename) {
     const docFile = zip.file('word/document.xml');
     if (docFile) {
       const origDocXml = await docFile.async('string');
-      console.log('[remediateDocx] Processing document.xml');
       const afterShadows = removeShadowsAndNormalizeFonts(origDocXml);
       writeIfChanged('word/document.xml', origDocXml, afterShadows);
     }
@@ -111,7 +106,6 @@ async function remediateDocx(fileData, filename) {
     const stylesFile = zip.file('word/styles.xml');
     if (stylesFile) {
       const origStylesXml = await stylesFile.async('string');
-      console.log('[remediateDocx] Processing styles.xml');
       const afterStylesShadows = removeShadowsAndNormalizeFonts(origStylesXml);
       writeIfChanged('word/styles.xml', origStylesXml, afterStylesShadows);
     }
@@ -120,7 +114,6 @@ async function remediateDocx(fileData, filename) {
     const themeFile = zip.file('word/theme/theme1.xml');
     if (themeFile) {
       const origThemeXml = await themeFile.async('string');
-      console.log('[remediateDocx] Processing theme1.xml');
       const afterTheme = removeShadowsAndNormalizeFonts(origThemeXml);
       writeIfChanged('word/theme/theme1.xml', origThemeXml, afterTheme);
     }
@@ -132,7 +125,6 @@ async function remediateDocx(fileData, filename) {
         const origSettings = await settingsFile.async('string');
         const hasAnyProt = /<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection|enforcement|locked|trackRevisions|crypt)\b/.test(origSettings);
         if (hasAnyProt) {
-          console.log('[remediateDocx] Removing protection from settings.xml');
           let cleaned = origSettings;
           
           cleaned = cleaned.replace(/<w:(?:documentProtection|writeProtection|readOnlyRecommended|editRestrictions|formProtection|protection|docProtection)[^>]*\/>/g, '');
@@ -151,7 +143,6 @@ async function remediateDocx(fileData, filename) {
     }
     
     // Generate with proper compression
-    console.log('[remediateDocx] Generating final ZIP...');
     const remediatedBuffer = await zip.generateAsync({ 
       type: 'nodebuffer',
       compression: 'DEFLATE',
