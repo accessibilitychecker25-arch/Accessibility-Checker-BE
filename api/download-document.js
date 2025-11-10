@@ -253,6 +253,12 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
     '<w:pPr><w:spacing w:line="360" w:lineRule="auto"/>'
   );
   
+  // Add paragraph properties with proper spacing to paragraphs that have no pPr at all
+  fixedXml = fixedXml.replace(
+    /<w:p([^>]*)>(?!\s*<w:pPr)/g,
+    '<w:p$1><w:pPr><w:spacing w:line="360" w:lineRule="auto"/></w:pPr>'
+  );
+  
   // If nothing changed, return null so callers can avoid rewriting the part
   if (fixedXml === original) return null;
   return fixedXml;
