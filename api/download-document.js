@@ -223,6 +223,36 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
     }
   );
   
+  // 9. Fix line spacing to be at least 1.5 (360 twentieths of a point)
+  // Replace any spacing that's less than 1.5 or uses exact spacing
+  fixedXml = fixedXml.replace(
+    /<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/g,
+    (match, lineValue) => {
+      const currentSpacing = parseInt(lineValue);
+      // If spacing is less than 360 (1.5), set it to 360
+      if (currentSpacing < 360) {
+        return '<w:spacing w:line="360" w:lineRule="auto"/>';
+      }
+      // If it has exact spacing, change to auto with minimum 1.5
+      if (match.includes('w:lineRule="exact"')) {
+        return '<w:spacing w:line="360" w:lineRule="auto"/>';
+      }
+      return match;
+    }
+  );
+  
+  // Also handle spacing elements without line values or with exact rule
+  fixedXml = fixedXml.replace(
+    /<w:spacing[^>]*w:lineRule="exact"[^>]*\/>/g,
+    '<w:spacing w:line="360" w:lineRule="auto"/>'
+  );
+  
+  // Add default spacing to paragraphs that don't have any spacing defined
+  fixedXml = fixedXml.replace(
+    /<w:pPr>(?![^<]*<w:spacing)/g,
+    '<w:pPr><w:spacing w:line="360" w:lineRule="auto"/>'
+  );
+  
   // If nothing changed, return null so callers can avoid rewriting the part
   if (fixedXml === original) return null;
   return fixedXml;
