@@ -317,10 +317,11 @@ async function analyzeShadowsAndFonts(zip) {
     
     // Check for paragraphs without any line spacing (needs default 1.5 spacing)
     if (!results.hasInsufficientLineSpacing) {
-      const paragraphsWithoutSpacing = documentXml.match(/<w:p[^>]*>(?![^<]*<w:pPr[^>]*>[^<]*<w:spacing)/g);
-      const paragraphsWithoutPPr = documentXml.match(/<w:p[^>]*>(?!\s*<w:pPr)/g);
-      if ((paragraphsWithoutSpacing && paragraphsWithoutSpacing.length > 0) || 
-          (paragraphsWithoutPPr && paragraphsWithoutPPr.length > 0)) {
+      const totalParagraphs = (documentXml.match(/<w:p[^>]*>/g) || []).length;
+      const paragraphsWithSpacing = (documentXml.match(/<w:spacing w:line="360"/g) || []).length;
+      
+      // If we have paragraphs but none have proper 1.5 spacing, they need fixing
+      if (totalParagraphs > 0 && paragraphsWithSpacing === 0) {
         results.hasInsufficientLineSpacing = true;
       }
     }
