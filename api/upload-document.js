@@ -93,6 +93,7 @@ async function analyzeDocx(fileData, filename) {
       textShadowsRemoved: false,
       fontsNormalized: false,
       fontSizesNormalized: false,
+      lineSpacingFixed: false,
     }
   };
 
@@ -193,6 +194,11 @@ async function analyzeDocx(fileData, filename) {
       report.summary.fixed += 1;
       console.log('[analyzeDocx] small fonts detected, fix count now:', report.summary.fixed);
     }
+    if (shadowFontResults.hasInsufficientLineSpacing) {
+      report.details.lineSpacingFixed = true;
+      report.summary.fixed += 1;
+      console.log('[analyzeDocx] insufficient line spacing detected, fix count now:', report.summary.fixed);
+    }
     
     console.log('[analyzeDocx] FINAL fix count before return:', report.summary.fixed);
     
@@ -238,7 +244,8 @@ async function analyzeShadowsAndFonts(zip) {
   const results = {
     hasShadows: false,
     hasSerifFonts: false,
-    hasSmallFonts: false
+    hasSmallFonts: false,
+    hasInsufficientLineSpacing: false
   };
 
   // Track which parts triggered shadow detection for debugging/accuracy
@@ -290,6 +297,33 @@ async function analyzeShadowsAndFonts(zip) {
         }
       }
     }
+    
+    // Check for insufficient line spacing (less than 1.5 = 360 twentieths of a point)
+    const spacingMatches = documentXml.match(/<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/g);
+    if (spacingMatches) {
+      for (const match of spacingMatches) {
+        const lineValue = parseInt(match.match(/w:line="(\d+)"/)[1]);
+        if (lineValue < 360) {
+          results.hasInsufficientLineSpacing = true;
+          break;
+        }
+      }
+    }
+    
+    // Check for exact line spacing (should be auto for accessibility)
+    if (!results.hasInsufficientLineSpacing && documentXml.includes('w:lineRule="exact"')) {
+      results.hasInsufficientLineSpacing = true;
+    }
+    
+    // Check for paragraphs without any line spacing (needs default 1.5 spacing)
+    if (!results.hasInsufficientLineSpacing) {
+      const paragraphsWithoutSpacing = documentXml.match(/<w:p[^>]*>(?![^<]*<w:pPr[^>]*>[^<]*<w:spacing)/g);
+      const paragraphsWithoutPPr = documentXml.match(/<w:p[^>]*>(?!\s*<w:pPr)/g);
+      if ((paragraphsWithoutSpacing && paragraphsWithoutSpacing.length > 0) || 
+          (paragraphsWithoutPPr && paragraphsWithoutPPr.length > 0)) {
+        results.hasInsufficientLineSpacing = true;
+      }
+    }
   }
 
   // Check styles.xml for shadows, fonts, and sizes
@@ -315,6 +349,25 @@ async function analyzeShadowsAndFonts(zip) {
             break;
           }
         }
+      }
+    }
+    
+    // Check styles.xml for insufficient line spacing
+    if (!results.hasInsufficientLineSpacing) {
+      const spacingMatches = stylesXml.match(/<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/g);
+      if (spacingMatches) {
+        for (const match of spacingMatches) {
+          const lineValue = parseInt(match.match(/w:line="(\d+)"/)[1]);
+          if (lineValue < 360) {
+            results.hasInsufficientLineSpacing = true;
+            break;
+          }
+        }
+      }
+      
+      // Check for exact line spacing in styles
+      if (!results.hasInsufficientLineSpacing && stylesXml.includes('w:lineRule="exact"')) {
+        results.hasInsufficientLineSpacing = true;
       }
     }
   }
