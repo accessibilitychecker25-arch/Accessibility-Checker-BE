@@ -96,6 +96,8 @@ async function analyzeDocx(fileData, filename) {
       fontSizeNeedsFixing: false,
       fontTypeNeedsFixing: false,
       linkNamesNeedImprovement: false,
+      formsDetected: false,
+      flashingObjectsDetected: false,
     }
   };
 
@@ -165,6 +167,26 @@ async function analyzeDocx(fileData, filename) {
         report.details.linkNamesNeedImprovement = true;
         report.details.linkLocations = linkResults.nonDescriptiveLinks;
         report.summary.flagged += linkResults.nonDescriptiveLinks.length;
+      }
+      
+      // Check for forms and form fields
+      const formResults = analyzeForms(documentXml);
+      console.log('[analyzeDocx] Form analysis results:', formResults.length, 'forms found');
+      if (formResults.length > 0) {
+        report.details.formsDetected = true;
+        report.details.formLocations = formResults;
+        report.summary.flagged += formResults.length;
+        console.log('[analyzeDocx] Forms detected, flagged count now:', report.summary.flagged);
+      } else {
+        console.log('[analyzeDocx] No forms detected in document');
+      }
+      
+      // Check for flashing/animated objects  
+      const flashingResults = analyzeFlashingObjects(documentXml);
+      if (flashingResults.length > 0) {
+        report.details.flashingObjectsDetected = true;
+        report.details.flashingObjectLocations = flashingResults;
+        report.summary.flagged += flashingResults.length;
       }
     }
     
@@ -506,6 +528,148 @@ function extractTextFromParagraph(paragraphXml) {
     .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
     .join('')
     .trim();
+}
+
+// Analyze forms and flashing objects in the document
+// Analyze forms and form fields in the document
+function analyzeForms(documentXml) {
+  const results = [];
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Check for page breaks
+    if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
+      approximatePageNumber++;
+    }
+    
+    // Track headings
+    const headingMatch = paragraph.match(/<w:pStyle w:val="(Heading\d+)"\/>/);
+    if (headingMatch) {
+      const headingText = extractTextFromParagraph(paragraph);
+      currentHeading = `${headingMatch[1]}: ${headingText.substring(0, 50)}${headingText.length > 50 ? '...' : ''}`;
+    }
+
+    // Check for form fields and form controls
+    const formElements = [
+      /<w:fldSimple[^>]*FORMTEXT/,                  // Text form fields
+      /<w:fldSimple[^>]*FORMCHECKBOX/,              // Checkbox form fields  
+      /<w:fldSimple[^>]*FORMDROPDOWN/,              // Dropdown form fields
+      /<w:ffData[\s\S]*?<\/w:ffData>/,              // Form field data (complete tags)
+      /<w:ffData>/,                                 // Form field data (opening tag)
+      /<w:checkBox/,                                // Checkbox controls
+      /<w:dropDownList/,                            // Dropdown list controls
+      /<w:textInput/,                               // Text input controls
+      /<w:sdt>/,                                    // Structured document tags (content controls)
+      /<w:sdtContent>/,                             // Content control content
+      /<w:fldChar w:fldCharType="begin"\/>/,        // Field character begin
+      /FORMTEXT/,                                   // Simple FORMTEXT detection
+      /FORMCHECKBOX/,                               // Simple FORMCHECKBOX detection
+      /FORMDROPDOWN/                                // Simple FORMDROPDOWN detection
+    ];
+
+    formElements.forEach((regex, formIndex) => {
+      const matches = paragraph.match(regex);
+      if (matches) {
+        const formType = getFormType(formIndex);
+        results.push({
+          type: formType,
+          location: `Paragraph ${paragraphCount}`,
+          approximatePage: approximatePageNumber,
+          context: currentHeading || 'Document body',
+          preview: extractTextFromParagraph(paragraph).substring(0, 150),
+          recommendation: 'Consider using alternative formats like accessible web forms or structured tables instead of Word form fields'
+        });
+      }
+    });
+  });
+
+  return results;
+}
+
+// Helper function to identify form type
+function getFormType(formIndex) {
+  const formTypes = [
+    'text-field', 'checkbox-field', 'dropdown-field', 'form-data-complete',
+    'form-data', 'checkbox-control', 'dropdown-control', 'text-input', 
+    'content-control', 'content-control-data', 'field-character',
+    'formtext-simple', 'formcheckbox-simple', 'formdropdown-simple'
+  ];
+  return formTypes[formIndex] || 'form-element';
+}
+
+// Helper function to identify flashing content type
+function getFlashingType(flashIndex) {
+  const flashTypes = [
+    'color-animation', 'rotation-animation', 'scale-animation', 
+    'motion-animation', 'generic-animation', 'effect-animation',
+    'timing-element', 'looping-video', 'looping-audio'
+  ];
+  return flashTypes[flashIndex] || 'animated-content';
+}
+
+// Analyze flashing objects in the document
+function analyzeFlashingObjects(documentXml) {
+  const results = [];
+  
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Check for potentially flashing/animated content
+  const flashingElements = [
+    /<w:drawing>[\s\S]*?<a:animClr/,              // Color animations
+    /<w:drawing>[\s\S]*?<a:animRot/,              // Rotation animations  
+    /<w:drawing>[\s\S]*?<a:animScale/,            // Scale animations
+    /<w:drawing>[\s\S]*?<a:animMotion/,           // Motion animations
+    /<w:drawing>[\s\S]*?<a:animate/,              // Generic animations
+    /<w:drawing>[\s\S]*?<a:animEffect/,           // Effect animations
+    /<p:timing>/,                                 // PowerPoint timing elements (embedded)
+    /<a:videoFile[^>]*loop/,                      // Looping videos
+    /<a:audioFile[^>]*loop/                       // Looping audio
+  ];
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Track page numbers (estimate)
+    if (paragraphCount % 15 === 0) {
+      approximatePageNumber++;
+    }
+
+    // Track headings for context
+    if (/<w:pStyle w:val="Heading/.test(paragraph)) {
+      currentHeading = extractTextFromParagraph(paragraph);
+    }
+
+    flashingElements.forEach((regex, flashIndex) => {
+      if (regex.test(paragraph)) {
+        const flashType = getFlashingType(flashIndex);
+        results.push({
+          type: flashType,
+          location: `Paragraph ${paragraphCount}`,
+          approximatePage: approximatePageNumber,
+          context: currentHeading || 'Document body',
+          preview: extractTextFromParagraph(paragraph).substring(0, 150) || 'Animated content detected',
+          recommendation: 'Remove animated/flashing content to prevent seizures and improve accessibility for all users'
+        });
+      }
+    });
+  });
+
+  return results;
 }
 
 // Analyze link descriptiveness in the document
