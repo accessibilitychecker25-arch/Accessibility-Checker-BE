@@ -101,8 +101,12 @@ async function analyzeDocx(fileData, filename) {
   try {
     const zip = await JSZip.loadAsync(fileData);
     
-    // Check title - requires user action to fix
+    // Read core documents once for analysis
+    const documentXml = await zip.file('word/document.xml')?.async('string');
     const coreXml = await zip.file('docProps/core.xml')?.async('string');
+    const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('string');
+    
+    // Check title - requires user action to fix
     if (coreXml) {
       if (coreXml.includes('<dc:title></dc:title>') || coreXml.includes('<dc:title/>')) {
         report.details.titleNeedsFixing = true;
@@ -110,14 +114,13 @@ async function analyzeDocx(fileData, filename) {
       }
     }
     
-    // Check for images
-    const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('string');
-    if (relsXml) {
-      const imageMatches = relsXml.match(/relationships\/image"/g);
-      const imageCount = imageMatches ? imageMatches.length : 0;
-      if (imageCount > 0) {
-        report.details.imagesMissingOrBadAlt = imageCount;
-        report.summary.flagged += imageCount;
+    // Check for images with location details
+    if (relsXml && documentXml) {
+      const imageAnalysis = analyzeImageLocations(documentXml, relsXml);
+      if (imageAnalysis.imagesWithoutAlt.length > 0) {
+        report.details.imagesMissingOrBadAlt = imageAnalysis.imagesWithoutAlt.length;
+        report.details.imageLocations = imageAnalysis.imagesWithoutAlt;
+        report.summary.flagged += imageAnalysis.imagesWithoutAlt.length;
       }
     }
     
@@ -142,7 +145,6 @@ async function analyzeDocx(fileData, filename) {
     }
     
     // Check headings for empty content and proper order
-    const documentXml = await zip.file('word/document.xml')?.async('string');
     if (documentXml) {
       const headingResults = analyzeHeadings(documentXml);
       
@@ -185,19 +187,22 @@ async function analyzeDocx(fileData, filename) {
       // ensure falsey/empty detection doesn't report a fix
       report.details.textShadowsRemoved = false;
     }
-    // These are now flagged for user attention instead of auto-fixed
+    // These are now flagged for user attention instead of auto-fixed (with location details)
     if (shadowFontResults.hasSerifFonts) {
       report.details.fontTypeNeedsFixing = true;
+      report.details.fontTypeLocations = shadowFontResults.fontIssueLocations.filter(issue => issue.type === 'serif');
       report.summary.flagged += 1;
       console.log('[analyzeDocx] serif fonts detected, flagged count now:', report.summary.flagged);
     }
     if (shadowFontResults.hasSmallFonts) {
       report.details.fontSizeNeedsFixing = true;
+      report.details.fontSizeLocations = shadowFontResults.fontIssueLocations.filter(issue => issue.type === 'small');
       report.summary.flagged += 1;
       console.log('[analyzeDocx] small fonts detected, flagged count now:', report.summary.flagged);
     }
     if (shadowFontResults.hasInsufficientLineSpacing) {
       report.details.lineSpacingNeedsFixing = true;
+      report.details.lineSpacingLocations = shadowFontResults.lineSpacingIssueLocations;
       report.summary.flagged += 1;
       console.log('[analyzeDocx] insufficient line spacing detected, flagged count now:', report.summary.flagged);
     }
@@ -241,7 +246,7 @@ function findRemainingProtectionMatches(zip) {
       details: {}
     };
   }
-// Analyze shadows and fonts in the document
+// Analyze shadows and fonts in the document with location details
 async function analyzeShadowsAndFonts(zip) {
   const results = {
     hasShadows: false,
@@ -250,8 +255,10 @@ async function analyzeShadowsAndFonts(zip) {
     hasInsufficientLineSpacing: false
   };
 
-  // Track which parts triggered shadow detection for debugging/accuracy
+  // Track detailed locations of issues
   results.shadowParts = [];
+  results.fontIssueLocations = [];
+  results.lineSpacingIssueLocations = [];
 
   // Function to check for shadow tags only (conservative, avoids false positives)
   // Returns the matched tag string or null
@@ -273,59 +280,26 @@ async function analyzeShadowsAndFonts(zip) {
     return m ? m[0] : null;
   };
 
-  // Check document.xml for shadows, fonts, and sizes
+  // Analyze document.xml with detailed location tracking
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (documentXml) {
-    // Check for all shadow types
-    const m = hasShadowEffects(documentXml, 'word/document.xml');
-    if (m) {
+    const locationResults = analyzeDocumentLocations(documentXml);
+    
+    // Merge results with location details
+    if (locationResults.shadows.length > 0) {
       results.hasShadows = true;
-      results.shadowParts.push({ part: 'word/document.xml', match: m.slice(0, 200) });
+      results.shadowParts = locationResults.shadows;
     }
     
-    // Check for serif fonts (Times, Times New Roman, Georgia, etc.)
-    if (/(Times|Georgia|Garamond|serif)/i.test(documentXml)) {
-      results.hasSerifFonts = true;
+    if (locationResults.fontIssues.length > 0) {
+      results.hasSerifFonts = locationResults.fontIssues.some(issue => issue.type === 'serif');
+      results.hasSmallFonts = locationResults.fontIssues.some(issue => issue.type === 'small');
+      results.fontIssueLocations = locationResults.fontIssues;
     }
     
-    // Check for small font sizes (less than 22 half-points = 11pt)
-    const sizeMatches = documentXml.match(/<w:sz w:val="(\d+)"/g);
-    if (sizeMatches) {
-      for (const match of sizeMatches) {
-        const size = parseInt(match.match(/\d+/)[0]);
-        if (size < 22) {
-          results.hasSmallFonts = true;
-          break;
-        }
-      }
-    }
-    
-    // Check for insufficient line spacing (less than 1.5 = 360 twentieths of a point)
-    const spacingMatches = documentXml.match(/<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/g);
-    if (spacingMatches) {
-      for (const match of spacingMatches) {
-        const lineValue = parseInt(match.match(/w:line="(\d+)"/)[1]);
-        if (lineValue < 360) {
-          results.hasInsufficientLineSpacing = true;
-          break;
-        }
-      }
-    }
-    
-    // Check for exact line spacing (should be auto for accessibility)
-    if (!results.hasInsufficientLineSpacing && documentXml.includes('w:lineRule="exact"')) {
+    if (locationResults.lineSpacingIssues.length > 0) {
       results.hasInsufficientLineSpacing = true;
-    }
-    
-    // Check for paragraphs without any line spacing (needs default 1.5 spacing)
-    if (!results.hasInsufficientLineSpacing) {
-      const totalParagraphs = (documentXml.match(/<w:p[^>]*>/g) || []).length;
-      const paragraphsWithSpacing = (documentXml.match(/<w:spacing w:line="360"/g) || []).length;
-      
-      // If we have paragraphs but none have proper 1.5 spacing, they need fixing
-      if (totalParagraphs > 0 && paragraphsWithSpacing === 0) {
-        results.hasInsufficientLineSpacing = true;
-      }
+      results.lineSpacingIssueLocations = locationResults.lineSpacingIssues;
     }
   }
 
@@ -391,6 +365,206 @@ async function analyzeShadowsAndFonts(zip) {
       }
     }
   }
+
+  return results;
+}
+
+// Analyze document structure and find specific locations of accessibility issues
+function analyzeDocumentLocations(documentXml) {
+  const results = {
+    shadows: [],
+    fontIssues: [],
+    lineSpacingIssues: []
+  };
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Check for page breaks to estimate page numbers
+    if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
+      approximatePageNumber++;
+    }
+    
+    // Check if this is a heading to track document structure
+    const headingMatch = paragraph.match(/<w:pStyle w:val="(Heading\d+)"\/>/);
+    if (headingMatch) {
+      const headingText = extractTextFromParagraph(paragraph);
+      currentHeading = `${headingMatch[1]}: ${headingText.substring(0, 50)}${headingText.length > 50 ? '...' : ''}`;
+    }
+
+    // Check for shadow effects in this paragraph
+    const shadowRegex = /<\s*(?:w|a|w14|w15):(?:shadow|outerShdw|innerShdw|prstShdw|glow|reflection|props3d)\b[^>]*>/i;
+    if (shadowRegex.test(paragraph)) {
+      results.shadows.push({
+        location: `Paragraph ${paragraphCount}`,
+        approximatePage: approximatePageNumber,
+        context: currentHeading || 'Document body',
+        preview: extractTextFromParagraph(paragraph).substring(0, 100)
+      });
+    }
+
+    // Check for font issues
+    const fontMatches = paragraph.match(/w:(?:ascii|hAnsi|cs|eastAsia)="([^"]+)"/g);
+    if (fontMatches) {
+      for (const fontMatch of fontMatches) {
+        const fontName = fontMatch.match(/"([^"]+)"/)[1];
+        if (/(Times|Georgia|Garamond|serif)/i.test(fontName)) {
+          results.fontIssues.push({
+            type: 'serif',
+            font: fontName,
+            location: `Paragraph ${paragraphCount}`,
+            approximatePage: approximatePageNumber,
+            context: currentHeading || 'Document body',
+            preview: extractTextFromParagraph(paragraph).substring(0, 100)
+          });
+          break; // Only record once per paragraph
+        }
+      }
+    }
+
+    // Check for small font sizes
+    const sizeMatches = paragraph.match(/<w:sz w:val="(\d+)"/g);
+    if (sizeMatches) {
+      for (const sizeMatch of sizeMatches) {
+        const size = parseInt(sizeMatch.match(/\d+/)[0]);
+        if (size < 22) {
+          results.fontIssues.push({
+            type: 'small',
+            size: `${size/2}pt`,
+            location: `Paragraph ${paragraphCount}`,
+            approximatePage: approximatePageNumber,
+            context: currentHeading || 'Document body',
+            preview: extractTextFromParagraph(paragraph).substring(0, 100)
+          });
+          break; // Only record once per paragraph
+        }
+      }
+    }
+
+    // Check for line spacing issues
+    const spacingMatch = paragraph.match(/<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/);
+    if (spacingMatch) {
+      const lineValue = parseInt(spacingMatch[1]);
+      if (lineValue < 360) {
+        results.lineSpacingIssues.push({
+          type: 'insufficient',
+          currentSpacing: `${(lineValue/240).toFixed(1)}x`,
+          location: `Paragraph ${paragraphCount}`,
+          approximatePage: approximatePageNumber,
+          context: currentHeading || 'Document body',
+          preview: extractTextFromParagraph(paragraph).substring(0, 100)
+        });
+      }
+    } else if (paragraph.includes('w:lineRule="exact"')) {
+      results.lineSpacingIssues.push({
+        type: 'exact',
+        currentSpacing: 'Exact spacing',
+        location: `Paragraph ${paragraphCount}`,
+        approximatePage: approximatePageNumber,
+        context: currentHeading || 'Document body',
+        preview: extractTextFromParagraph(paragraph).substring(0, 100)
+      });
+    } else if (!paragraph.includes('<w:spacing') && extractTextFromParagraph(paragraph).trim().length > 0) {
+      // Paragraph with text but no spacing defined
+      results.lineSpacingIssues.push({
+        type: 'missing',
+        currentSpacing: 'Default spacing',
+        location: `Paragraph ${paragraphCount}`,
+        approximatePage: approximatePageNumber,
+        context: currentHeading || 'Document body',
+        preview: extractTextFromParagraph(paragraph).substring(0, 100)
+      });
+    }
+  });
+
+  return results;
+}
+
+// Extract readable text from a paragraph XML element
+function extractTextFromParagraph(paragraphXml) {
+  const textMatches = paragraphXml.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
+  if (!textMatches) return '';
+  
+  return textMatches
+    .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
+    .join('')
+    .trim();
+}
+
+// Analyze image locations and alt text in the document
+function analyzeImageLocations(documentXml, relsXml) {
+  const results = {
+    imagesWithoutAlt: []
+  };
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Get image relationships
+  const imageRels = {};
+  const relMatches = relsXml.match(/<Relationship[^>]*Type="[^"]*\/image"[^>]*>/g) || [];
+  relMatches.forEach(rel => {
+    const idMatch = rel.match(/Id="([^"]+)"/);
+    const targetMatch = rel.match(/Target="([^"]+)"/);
+    if (idMatch && targetMatch) {
+      imageRels[idMatch[1]] = targetMatch[1];
+    }
+  });
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Check for page breaks
+    if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
+      approximatePageNumber++;
+    }
+    
+    // Track headings
+    const headingMatch = paragraph.match(/<w:pStyle w:val="(Heading\d+)"\/>/);
+    if (headingMatch) {
+      const headingText = extractTextFromParagraph(paragraph);
+      currentHeading = `${headingMatch[1]}: ${headingText.substring(0, 50)}${headingText.length > 50 ? '...' : ''}`;
+    }
+
+    // Check for images in this paragraph
+    const drawingMatches = paragraph.match(/<w:drawing>[\s\S]*?<\/w:drawing>/g) || [];
+    drawingMatches.forEach(drawing => {
+      // Check for image references
+      const blipMatches = drawing.match(/<a:blip r:embed="([^"]+)"/g) || [];
+      blipMatches.forEach(blip => {
+        const embedId = blip.match(/r:embed="([^"]+)"/)[1];
+        const imagePath = imageRels[embedId];
+        
+        // Check for alt text
+        const hasAltText = drawing.includes('<wp:docPr') && 
+                          (drawing.includes('descr="') || drawing.includes('title="')) &&
+                          !drawing.includes('descr=""') && !drawing.includes('title=""');
+        
+        if (!hasAltText) {
+          results.imagesWithoutAlt.push({
+            location: `Paragraph ${paragraphCount}`,
+            approximatePage: approximatePageNumber,
+            context: currentHeading || 'Document body',
+            imagePath: imagePath || 'Unknown image',
+            preview: extractTextFromParagraph(paragraph).substring(0, 100) || 'No surrounding text'
+          });
+        }
+      });
+    });
+  });
 
   return results;
 }
