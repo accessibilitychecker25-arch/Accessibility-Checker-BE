@@ -1,6 +1,17 @@
 const Busboy = require('busboy');
 const JSZip = require('jszip');
 
+// Helper function to extract text from paragraph XML - moved to top for availability
+function extractTextFromParagraph(paragraphXml) {
+  const textMatches = paragraphXml.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
+  if (!textMatches) return '';
+  
+  return textMatches
+    .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
+    .join('')
+    .trim();
+}
+
 module.exports = async (req, res) => {
   // CORS: safe allowlist — echo back the requesting Origin when allowed.
   const ALLOWED_ORIGINS = [
@@ -526,18 +537,6 @@ function analyzeDocumentLocations(documentXml) {
   return results;
 }
 
-// Extract readable text from a paragraph XML element
-function extractTextFromParagraph(paragraphXml) {
-  const textMatches = paragraphXml.match(/<w:t[^>]*>(.*?)<\/w:t>/g);
-  if (!textMatches) return '';
-  
-  return textMatches
-    .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
-    .join('')
-    .trim();
-}
-
-// Analyze forms and flashing objects in the document
 // Analyze forms and form fields in the document
 function analyzeForms(documentXml) {
   const results = [];
