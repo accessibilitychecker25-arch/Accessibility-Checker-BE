@@ -538,6 +538,9 @@ function analyzeForms(documentXml) {
   let paragraphCount = 0;
   let currentHeading = null;
   let approximatePageNumber = 1;
+  
+  // Track unique form field locations to prevent duplicates
+  const seenFormLocations = new Set();
 
   // Split into paragraphs for analysis
   const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
@@ -576,20 +579,43 @@ function analyzeForms(documentXml) {
       /FORMDROPDOWN/                                // Simple FORMDROPDOWN detection
     ];
 
+    // Check for any form field in this paragraph and avoid duplicates
+    let formDetectedInParagraph = false;
+    let bestFormType = null;
+    let detectedPatterns = [];
+
     formElements.forEach((regex, formIndex) => {
       const matches = paragraph.match(regex);
       if (matches) {
+        formDetectedInParagraph = true;
         const formType = getFormType(formIndex);
+        detectedPatterns.push(formType);
+        
+        // Prioritize more specific form types over generic ones
+        if (!bestFormType || isPriorityFormType(formType, bestFormType)) {
+          bestFormType = formType;
+        }
+      }
+    });
+
+    // Only add one form detection per paragraph to avoid duplicates
+    if (formDetectedInParagraph) {
+      const locationKey = `${paragraphCount}-${approximatePageNumber}`;
+      
+      if (!seenFormLocations.has(locationKey)) {
+        seenFormLocations.add(locationKey);
+        
         results.push({
-          type: formType,
+          type: bestFormType,
           location: `Paragraph ${paragraphCount}`,
           approximatePage: approximatePageNumber,
           context: currentHeading || 'Document body',
           preview: extractTextFromParagraph(paragraph).substring(0, 150),
-          recommendation: 'Consider using alternative formats like accessible web forms or structured tables instead of Word form fields'
+          recommendation: 'Consider using alternative formats like accessible web forms or structured tables instead of Word form fields',
+          detectedPatterns: detectedPatterns // Debug info showing all patterns that matched
         });
       }
-    });
+    }
   });
 
   return results;
@@ -604,6 +630,30 @@ function getFormType(formIndex) {
     'formtext-simple', 'formcheckbox-simple', 'formdropdown-simple'
   ];
   return formTypes[formIndex] || 'form-element';
+}
+
+// Helper function to prioritize more specific form types over generic ones
+function isPriorityFormType(newType, currentType) {
+  // Priority order: specific form types > generic types
+  const priorityOrder = {
+    'form-data-complete': 10,
+    'text-field': 9,
+    'checkbox-field': 9,
+    'dropdown-field': 9,
+    'checkbox-control': 8,
+    'dropdown-control': 8,
+    'text-input': 8,
+    'form-data': 7,
+    'content-control': 6,
+    'content-control-data': 5,
+    'field-character': 4,
+    'formtext-simple': 3,
+    'formcheckbox-simple': 3,
+    'formdropdown-simple': 3,
+    'form-element': 1
+  };
+  
+  return (priorityOrder[newType] || 1) > (priorityOrder[currentType] || 1);
 }
 
 // Helper function to identify flashing content type
