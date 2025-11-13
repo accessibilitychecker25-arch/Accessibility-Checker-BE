@@ -127,16 +127,23 @@ async function analyzeDocx(fileData, filename) {
       }
     }
     
-    // Check for GIFs
+    // Check for GIFs with location information
     const gifFiles = [];
     zip.forEach((relativePath, file) => {
       if (relativePath.startsWith('word/media/') && relativePath.toLowerCase().endsWith('.gif')) {
         gifFiles.push(relativePath);
       }
     });
+    
     if (gifFiles.length > 0) {
+      // Get location information for GIFs
+      const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('string');
+      const gifLocations = analyzeGifLocations(documentXml, relsXml, gifFiles);
+      
       report.details.gifsDetected = gifFiles;
+      report.details.gifLocations = gifLocations;
       report.summary.flagged += gifFiles.length;
+      console.log('[analyzeDocx] GIFs detected with locations, flagged count now:', report.summary.flagged);
     }
 
     // Shadow detection deferred to analyzeShadowsAndFonts (single source of truth)
@@ -957,6 +964,102 @@ async function scanForRemainingProtection(fileData) {
   return findings;
 }
 
+}
+
+// Analyze GIF locations in the document
+function analyzeGifLocations(documentXml, relsXml, gifFiles) {
+  const results = [];
+  
+  if (!relsXml || !gifFiles.length) {
+    return results;
+  }
+
+  // Create mapping of relationship IDs to GIF files
+  const gifRelationships = new Map();
+  gifFiles.forEach(gifPath => {
+    // Extract filename from path (e.g., "word/media/image1.gif" -> "image1.gif")
+    const fileName = gifPath.split('/').pop();
+    
+    // Find relationship ID for this GIF in rels XML - try multiple patterns
+    const patterns = [
+      new RegExp(`<Relationship[^>]*Target="media/${fileName.replace('.', '\\.')}"[^>]*Id="([^"]*)"`, 'i'),
+      new RegExp(`<Relationship[^>]*Id="([^"]*)"[^>]*Target="media/${fileName.replace('.', '\\.')}"`, 'i'),
+      new RegExp(`Id="([^"]*)"[^>]*Target="[^"]*${fileName.replace('.', '\\.')}"`, 'i')
+    ];
+    
+    for (const pattern of patterns) {
+      const relMatch = relsXml.match(pattern);
+      if (relMatch) {
+        gifRelationships.set(relMatch[1], {
+          file: gifPath,
+          fileName: fileName
+        });
+        console.log(`[analyzeGifLocations] Found GIF relationship: ${relMatch[1]} -> ${fileName}`);
+        break;
+      }
+    }
+  });
+
+  if (gifRelationships.size === 0) {
+    return results;
+  }
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Split document into paragraphs
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Track page numbers (estimate)
+    if (paragraphCount % 15 === 0) {
+      approximatePageNumber++;
+    }
+
+    // Track headings for context
+    if (/<w:pStyle w:val="Heading/.test(paragraph)) {
+      currentHeading = extractTextFromParagraph(paragraph);
+    }
+
+    // Check if this paragraph contains any GIF references
+    gifRelationships.forEach((gifInfo, relationshipId) => {
+      // Look for drawing elements that reference this GIF - try multiple patterns
+      const patterns = [
+        new RegExp(`<w:drawing[\\s\\S]*?r:embed="${relationshipId}"[\\s\\S]*?</w:drawing>`, 'i'),
+        new RegExp(`<a:blip[^>]*r:embed="${relationshipId}"`, 'i'),
+        new RegExp(`r:embed="${relationshipId}"`, 'i'), // Simple embed reference
+        new RegExp(`<w:drawing[\\s\\S]*?${relationshipId}[\\s\\S]*?</w:drawing>`, 'i') // Broader match
+      ];
+      
+      let foundMatch = false;
+      for (const pattern of patterns) {
+        if (pattern.test(paragraph)) {
+          foundMatch = true;
+          break;
+        }
+      }
+      
+      if (foundMatch) {
+        console.log(`[analyzeGifLocations] Found GIF in paragraph ${paragraphCount}: ${gifInfo.fileName}`);
+        results.push({
+          type: 'animated-gif',
+          file: gifInfo.file,
+          fileName: gifInfo.fileName,
+          location: `Paragraph ${paragraphCount}`,
+          approximatePage: approximatePageNumber,
+          context: currentHeading || 'Document body',
+          preview: extractTextFromParagraph(paragraph).substring(0, 150) || 'GIF image detected',
+          recommendation: 'Replace animated GIFs with static images or accessible alternatives to prevent seizures and improve accessibility for users with vestibular disorders'
+        });
+      }
+    });
+  });
+
+  return results;
 }
 
 function analyzeHeadings(documentXml) {
