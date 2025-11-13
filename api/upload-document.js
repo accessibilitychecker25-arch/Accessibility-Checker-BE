@@ -91,9 +91,10 @@ async function analyzeDocx(fileData, filename) {
       tablesHeaderRowSet: [],
       documentProtected: false,
       textShadowsRemoved: false,
-      fontsNormalized: false,
-      fontSizesNormalized: false,
-      lineSpacingFixed: false,
+      // Changed from "fixed" to "flagged" - user needs to manually address these
+      lineSpacingNeedsFixing: false,
+      fontSizeNeedsFixing: false,
+      fontTypeNeedsFixing: false,
     }
   };
 
@@ -184,20 +185,21 @@ async function analyzeDocx(fileData, filename) {
       // ensure falsey/empty detection doesn't report a fix
       report.details.textShadowsRemoved = false;
     }
+    // These are now flagged for user attention instead of auto-fixed
     if (shadowFontResults.hasSerifFonts) {
-      report.details.fontsNormalized = true;
-      report.summary.fixed += 1;
-      console.log('[analyzeDocx] serif fonts detected, fix count now:', report.summary.fixed);
+      report.details.fontTypeNeedsFixing = true;
+      report.summary.flagged += 1;
+      console.log('[analyzeDocx] serif fonts detected, flagged count now:', report.summary.flagged);
     }
     if (shadowFontResults.hasSmallFonts) {
-      report.details.fontSizesNormalized = true;
-      report.summary.fixed += 1;
-      console.log('[analyzeDocx] small fonts detected, fix count now:', report.summary.fixed);
+      report.details.fontSizeNeedsFixing = true;
+      report.summary.flagged += 1;
+      console.log('[analyzeDocx] small fonts detected, flagged count now:', report.summary.flagged);
     }
     if (shadowFontResults.hasInsufficientLineSpacing) {
-      report.details.lineSpacingFixed = true;
-      report.summary.fixed += 1;
-      console.log('[analyzeDocx] insufficient line spacing detected, fix count now:', report.summary.fixed);
+      report.details.lineSpacingNeedsFixing = true;
+      report.summary.flagged += 1;
+      console.log('[analyzeDocx] insufficient line spacing detected, flagged count now:', report.summary.flagged);
     }
     
     console.log('[analyzeDocx] FINAL fix count before return:', report.summary.fixed);

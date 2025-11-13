@@ -98,7 +98,7 @@ async function remediateDocx(fileData, filename) {
     const docFile = zip.file('word/document.xml');
     if (docFile) {
       const origDocXml = await docFile.async('string');
-      const afterShadows = removeShadowsAndNormalizeFonts(origDocXml);
+      const afterShadows = removeShadowsOnly(origDocXml);
       writeIfChanged('word/document.xml', origDocXml, afterShadows);
     }
     
@@ -106,7 +106,7 @@ async function remediateDocx(fileData, filename) {
     const stylesFile = zip.file('word/styles.xml');
     if (stylesFile) {
       const origStylesXml = await stylesFile.async('string');
-      const afterStylesShadows = removeShadowsAndNormalizeFonts(origStylesXml);
+      const afterStylesShadows = removeShadowsOnly(origStylesXml);
       writeIfChanged('word/styles.xml', origStylesXml, afterStylesShadows);
     }
     
@@ -114,7 +114,7 @@ async function remediateDocx(fileData, filename) {
     const themeFile = zip.file('word/theme/theme1.xml');
     if (themeFile) {
       const origThemeXml = await themeFile.async('string');
-      const afterTheme = removeShadowsAndNormalizeFonts(origThemeXml);
+      const afterTheme = removeShadowsOnly(origThemeXml);
       writeIfChanged('word/theme/theme1.xml', origThemeXml, afterTheme);
     }
     
@@ -158,7 +158,7 @@ async function remediateDocx(fileData, filename) {
 
 
 
-function removeShadowsAndNormalizeFonts(xmlContent) {
+function removeShadowsOnly(xmlContent) {
   const original = xmlContent;
   let fixedXml = xmlContent;
   
@@ -193,71 +193,8 @@ function removeShadowsAndNormalizeFonts(xmlContent) {
   // Remove only within attribute values, not entire element names
   fixedXml = fixedXml.replace(/\s+\w*shdw\w*\s*=\s*"[^"]*"/g, '');
   
-  // 6. Normalize fonts to Arial (sans-serif) - surgically replace font names
-  fixedXml = fixedXml.replace(/w:ascii="[^"]*"/g, 'w:ascii="Arial"');
-  fixedXml = fixedXml.replace(/w:hAnsi="[^"]*"/g, 'w:hAnsi="Arial"');
-  fixedXml = fixedXml.replace(/w:cs="[^"]*"/g, 'w:cs="Arial"');
-  fixedXml = fixedXml.replace(/w:eastAsia="[^"]*"/g, 'w:eastAsia="Arial"');
-  
-  // 7. Ensure minimum font size of 22 half-points (11pt)
-  fixedXml = fixedXml.replace(
-    /<w:sz w:val="(\d+)"\s*\/>/g,
-    (match, size) => {
-      const sizeNum = parseInt(size);
-      if (sizeNum < 22) {
-        return '<w:sz w:val="22"/>';
-      }
-      return match;
-    }
-  );
-  
-  // 8. Same for complex script font sizes
-  fixedXml = fixedXml.replace(
-    /<w:szCs w:val="(\d+)"\s*\/>/g,
-    (match, size) => {
-      const sizeNum = parseInt(size);
-      if (sizeNum < 22) {
-        return '<w:szCs w:val="22"/>';
-      }
-      return match;
-    }
-  );
-  
-  // 9. Fix line spacing to be at least 1.5 (360 twentieths of a point)
-  // Replace any spacing that's less than 1.5 or uses exact spacing
-  fixedXml = fixedXml.replace(
-    /<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/g,
-    (match, lineValue) => {
-      const currentSpacing = parseInt(lineValue);
-      // If spacing is less than 360 (1.5), set it to 360
-      if (currentSpacing < 360) {
-        return '<w:spacing w:line="360" w:lineRule="auto"/>';
-      }
-      // If it has exact spacing, change to auto with minimum 1.5
-      if (match.includes('w:lineRule="exact"')) {
-        return '<w:spacing w:line="360" w:lineRule="auto"/>';
-      }
-      return match;
-    }
-  );
-  
-  // Also handle spacing elements without line values or with exact rule
-  fixedXml = fixedXml.replace(
-    /<w:spacing[^>]*w:lineRule="exact"[^>]*\/>/g,
-    '<w:spacing w:line="360" w:lineRule="auto"/>'
-  );
-  
-  // Add default spacing to paragraphs that don't have any spacing defined
-  fixedXml = fixedXml.replace(
-    /<w:pPr>(?![^<]*<w:spacing)/g,
-    '<w:pPr><w:spacing w:line="360" w:lineRule="auto"/>'
-  );
-  
-  // Add paragraph properties with proper spacing to paragraphs that have no pPr at all
-  fixedXml = fixedXml.replace(
-    /<w:p([^>]*)>(?!\s*<w:pPr)/g,
-    '<w:p$1><w:pPr><w:spacing w:line="360" w:lineRule="auto"/></w:pPr>'
-  );
+  // NOTE: Font normalization, font size fixes, and line spacing fixes have been 
+  // removed - these are now flagged for user attention instead of auto-fixed
   
   // If nothing changed, return null so callers can avoid rewriting the part
   if (fixedXml === original) return null;
