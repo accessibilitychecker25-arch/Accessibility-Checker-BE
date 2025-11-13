@@ -58,11 +58,16 @@ async function testLinkDescriptiveness() {
               </w:p>
               <w:p>
                 <w:hyperlink r:id="rId3">
-                  <w:r><w:t>Download the accessibility guide</w:t></w:r>
+                  <w:r><w:t>Click this link:</w:t></w:r>
                 </w:hyperlink>
               </w:p>
               <w:p>
                 <w:hyperlink r:id="rId4">
+                  <w:r><w:t>Download the accessibility guide</w:t></w:r>
+                </w:hyperlink>
+              </w:p>
+              <w:p>
+                <w:hyperlink r:id="rId5">
                   <w:r><w:t>www.example.com</w:t></w:r>
                 </w:hyperlink>
               </w:p>
@@ -102,6 +107,17 @@ function testLinkAnalysis(documentXml) {
     'click here', 'here', 'read more', 'more', 'link', 'this link',
     'see more', 'learn more', 'find out more', 'more info', 'more information'
   ];
+
+  const genericPatterns = [
+    /^click\s+/i,           // "click this", "click the", etc.
+    /\bclick\s+\w+\s*:?\s*$/i, // "click this link:", "click button:", etc.
+    /^(here|there)\s*:?\s*$/i,  // "here:", "there:"
+    /^(this|that)\s+link\s*:?\s*$/i, // "this link:", "that link:"
+    /^read\s+(more|on)\s*:?\s*$/i,   // "read more:", "read on:"
+    /^see\s+(more|here|this)\s*:?\s*$/i, // "see more:", "see here:", etc.
+    /^(more|info|information)\s*:?\s*$/i, // "more:", "info:", etc.
+    /^(download|view|open)\s*:?\s*$/i     // "download:", "view:", etc.
+  ];
   
   const hyperlinkMatches = documentXml.match(/<w:hyperlink[^>]*>[\s\S]*?<\/w:hyperlink>/g) || [];
   
@@ -111,10 +127,11 @@ function testLinkAnalysis(documentXml) {
       const linkText = textMatch[1].toLowerCase().trim();
       
       const isGeneric = genericPhrases.some(phrase => linkText === phrase);
+      const isGenericPattern = genericPatterns.some(pattern => pattern.test(linkText));
       const isUrl = linkText.includes('www.') || linkText.includes('http');
       
       let issueType = null;
-      if (isGeneric) issueType = 'generic';
+      if (isGeneric || isGenericPattern) issueType = 'generic';
       if (isUrl) issueType = 'url-as-text';
       
       if (issueType) {

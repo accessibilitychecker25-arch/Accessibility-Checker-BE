@@ -528,6 +528,18 @@ function analyzeLinkDescriptiveness(documentXml) {
     'url', 'address', 'location'
   ];
 
+  // Additional patterns that are commonly non-descriptive
+  const genericPatterns = [
+    /^click\s+/i,           // "click this", "click the", etc.
+    /\bclick\s+\w+\s*:?\s*$/i, // "click this link:", "click button:", etc.
+    /^(here|there)\s*:?\s*$/i,  // "here:", "there:"
+    /^(this|that)\s+link\s*:?\s*$/i, // "this link:", "that link:"
+    /^read\s+(more|on)\s*:?\s*$/i,   // "read more:", "read on:"
+    /^see\s+(more|here|this)\s*:?\s*$/i, // "see more:", "see here:", etc.
+    /^(more|info|information)\s*:?\s*$/i, // "more:", "info:", etc.
+    /^(download|view|open)\s*:?\s*$/i     // "download:", "view:", etc.
+  ];
+
   // Split into paragraphs for analysis
   const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
   const paragraphs = documentXml.match(paragraphRegex) || [];
@@ -561,7 +573,7 @@ function analyzeLinkDescriptiveness(documentXml) {
       const linkText = extractTextFromParagraph(link).trim().toLowerCase();
       
       if (linkText && linkText.length > 0) {
-        // Check if the link text is non-descriptive
+        // Check if the link text is non-descriptive using exact phrases
         const isGeneric = genericPhrases.some(phrase => {
           // Exact match or the link text is just the generic phrase
           return linkText === phrase || 
@@ -571,6 +583,9 @@ function analyzeLinkDescriptiveness(documentXml) {
                  linkText.endsWith(' ' + phrase) ||
                  (linkText.length <= 15 && linkText.includes(phrase)); // Short phrases containing generic words
         });
+
+        // Check if the link text matches generic patterns
+        const isGenericPattern = genericPatterns.some(pattern => pattern.test(linkText));
         
         // Also flag very short links (likely non-descriptive)
         const isTooShort = linkText.length <= 3 && !linkText.match(/^[a-z]{2,3}$/); // Allow abbreviations like "FAQ", "PDF"
@@ -579,7 +594,7 @@ function analyzeLinkDescriptiveness(documentXml) {
         const isUrl = linkText.includes('www.') || linkText.includes('http') || linkText.includes('.com') || linkText.includes('.org');
         const isEmail = linkText.includes('@') && linkText.includes('.');
         
-        if (isGeneric || isTooShort || isUrl || isEmail) {
+        if (isGeneric || isGenericPattern || isTooShort || isUrl || isEmail) {
           let issueType = 'generic';
           if (isTooShort) issueType = 'too-short';
           if (isUrl) issueType = 'url-as-text';
