@@ -95,6 +95,7 @@ async function analyzeDocx(fileData, filename) {
       lineSpacingNeedsFixing: false,
       fontSizeNeedsFixing: false,
       fontTypeNeedsFixing: false,
+      linkNamesNeedImprovement: false,
     }
   };
 
@@ -156,6 +157,14 @@ async function analyzeDocx(fileData, filename) {
       if (headingResults.orderIssues.length > 0) {
         report.details.headingOrderIssues = headingResults.orderIssues;
         report.summary.flagged += headingResults.orderIssues.length;
+      }
+      
+      // Check for non-descriptive link text
+      const linkResults = analyzeLinkDescriptiveness(documentXml);
+      if (linkResults.nonDescriptiveLinks.length > 0) {
+        report.details.linkNamesNeedImprovement = true;
+        report.details.linkLocations = linkResults.nonDescriptiveLinks;
+        report.summary.flagged += linkResults.nonDescriptiveLinks.length;
       }
     }
     
@@ -497,6 +506,126 @@ function extractTextFromParagraph(paragraphXml) {
     .map(t => t.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
     .join('')
     .trim();
+}
+
+// Analyze link descriptiveness in the document
+function analyzeLinkDescriptiveness(documentXml) {
+  const results = {
+    nonDescriptiveLinks: []
+  };
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Generic/non-descriptive phrases to detect
+  const genericPhrases = [
+    'click here', 'here', 'read more', 'more', 'link', 'this link',
+    'see more', 'learn more', 'find out more', 'more info', 'more information',
+    'view more', 'details', 'continue', 'next', 'go', 'visit', 'see',
+    'download', 'open', 'access', 'view', 'show', 'display', 'get',
+    'this', 'that', 'these', 'those', 'it', 'page', 'site', 'website',
+    'url', 'address', 'location'
+  ];
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Check for page breaks
+    if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
+      approximatePageNumber++;
+    }
+    
+    // Track headings
+    const headingMatch = paragraph.match(/<w:pStyle w:val="(Heading\d+)"\/>/);
+    if (headingMatch) {
+      const headingText = extractTextFromParagraph(paragraph);
+      currentHeading = `${headingMatch[1]}: ${headingText.substring(0, 50)}${headingText.length > 50 ? '...' : ''}`;
+    }
+
+    // Check for hyperlinks in this paragraph
+    // Word hyperlinks are stored as <w:hyperlink> elements or <w:fldSimple> with HYPERLINK
+    const hyperlinkMatches = paragraph.match(/<w:hyperlink[^>]*>[\s\S]*?<\/w:hyperlink>/g) || [];
+    const fieldHyperlinkMatches = paragraph.match(/<w:fldSimple[^>]*fldChar[^>]*HYPERLINK[^>]*>[\s\S]*?<\/w:fldSimple>/g) || [];
+    
+    // Also check for runs that might contain hyperlink formatting
+    const runHyperlinkMatches = paragraph.match(/<w:r[^>]*>[\s\S]*?<w:rStyle w:val="Hyperlink"[^>]*\/>[\s\S]*?<\/w:r>/g) || [];
+    
+    const allLinks = [...hyperlinkMatches, ...fieldHyperlinkMatches, ...runHyperlinkMatches];
+    
+    allLinks.forEach(link => {
+      const linkText = extractTextFromParagraph(link).trim().toLowerCase();
+      
+      if (linkText && linkText.length > 0) {
+        // Check if the link text is non-descriptive
+        const isGeneric = genericPhrases.some(phrase => {
+          // Exact match or the link text is just the generic phrase
+          return linkText === phrase || 
+                 linkText === phrase + '.' || 
+                 linkText === phrase + '!' ||
+                 linkText.startsWith(phrase + ' ') ||
+                 linkText.endsWith(' ' + phrase) ||
+                 (linkText.length <= 15 && linkText.includes(phrase)); // Short phrases containing generic words
+        });
+        
+        // Also flag very short links (likely non-descriptive)
+        const isTooShort = linkText.length <= 3 && !linkText.match(/^[a-z]{2,3}$/); // Allow abbreviations like "FAQ", "PDF"
+        
+        // Flag URLs or email addresses used as link text
+        const isUrl = linkText.includes('www.') || linkText.includes('http') || linkText.includes('.com') || linkText.includes('.org');
+        const isEmail = linkText.includes('@') && linkText.includes('.');
+        
+        if (isGeneric || isTooShort || isUrl || isEmail) {
+          let issueType = 'generic';
+          if (isTooShort) issueType = 'too-short';
+          if (isUrl) issueType = 'url-as-text';
+          if (isEmail) issueType = 'email-as-text';
+          
+          results.nonDescriptiveLinks.push({
+            type: issueType,
+            linkText: linkText,
+            location: `Paragraph ${paragraphCount}`,
+            approximatePage: approximatePageNumber,
+            context: currentHeading || 'Document body',
+            preview: extractTextFromParagraph(paragraph).substring(0, 150),
+            recommendation: generateLinkRecommendation(linkText, issueType)
+          });
+        }
+      }
+    });
+  });
+
+  return results;
+}
+
+// Generate recommendations for improving link text
+function generateLinkRecommendation(linkText, issueType) {
+  switch (issueType) {
+    case 'generic':
+      if (linkText.includes('click here') || linkText.includes('here')) {
+        return 'Replace with descriptive text like "Download the user guide" or "View our services"';
+      }
+      if (linkText.includes('read more') || linkText.includes('more')) {
+        return 'Replace with specific text like "Read the full research report" or "Learn about our methodology"';
+      }
+      return 'Use descriptive text that explains where the link goes or what action it performs';
+    
+    case 'too-short':
+      return 'Expand to include more context, e.g., "Go" → "Go to our contact page"';
+    
+    case 'url-as-text':
+      return 'Replace URL with descriptive text like "Visit our company website" or "Access the online portal"';
+    
+    case 'email-as-text':
+      return 'Replace email with descriptive text like "Contact our support team" or "Email our sales department"';
+    
+    default:
+      return 'Use clear, descriptive language that tells users where the link will take them';
+  }
 }
 
 // Analyze image locations and alt text in the document
