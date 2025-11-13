@@ -517,6 +517,9 @@ function analyzeLinkDescriptiveness(documentXml) {
   let paragraphCount = 0;
   let currentHeading = null;
   let approximatePageNumber = 1;
+  
+  // Track unique link texts to prevent duplicates
+  const seenLinkTexts = new Set();
 
   // Generic/non-descriptive phrases to detect
   const genericPhrases = [
@@ -595,20 +598,25 @@ function analyzeLinkDescriptiveness(documentXml) {
         const isEmail = linkText.includes('@') && linkText.includes('.');
         
         if (isGeneric || isGenericPattern || isTooShort || isUrl || isEmail) {
-          let issueType = 'generic';
-          if (isTooShort) issueType = 'too-short';
-          if (isUrl) issueType = 'url-as-text';
-          if (isEmail) issueType = 'email-as-text';
-          
-          results.nonDescriptiveLinks.push({
-            type: issueType,
-            linkText: linkText,
-            location: `Paragraph ${paragraphCount}`,
-            approximatePage: approximatePageNumber,
-            context: currentHeading || 'Document body',
-            preview: extractTextFromParagraph(paragraph).substring(0, 150),
-            recommendation: generateLinkRecommendation(linkText, issueType)
-          });
+          // Check if we've already seen this exact link text
+          if (!seenLinkTexts.has(linkText)) {
+            seenLinkTexts.add(linkText);
+            
+            let issueType = 'generic';
+            if (isTooShort) issueType = 'too-short';
+            if (isUrl) issueType = 'url-as-text';
+            if (isEmail) issueType = 'email-as-text';
+            
+            results.nonDescriptiveLinks.push({
+              type: issueType,
+              linkText: linkText,
+              location: `Paragraph ${paragraphCount}`,
+              approximatePage: approximatePageNumber,
+              context: currentHeading || 'Document body',
+              preview: extractTextFromParagraph(paragraph).substring(0, 150),
+              recommendation: generateLinkRecommendation(linkText, issueType)
+            });
+          }
         }
       }
     });
