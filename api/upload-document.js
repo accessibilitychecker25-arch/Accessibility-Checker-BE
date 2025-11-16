@@ -528,22 +528,55 @@ function analyzeRunColors(runXml, textContent) {
   
   const runProperties = rPrMatch[1];
   
-  // Extract text color
+  // Extract text color - handle multiple formats
   let textColor = null;
+  
+  // Check for direct hex color
   const colorMatch = runProperties.match(/<w:color w:val="([^"]+)"\/>/); 
   if (colorMatch) {
     textColor = colorMatch[1];
   }
   
-  // Extract highlight/background color
-  let backgroundColor = null;
-  const highlightMatch = runProperties.match(/<w:highlight w:val="([^"]+)"\/>/); 
-  const shadingMatch = runProperties.match(/<w:shd[^>]*w:fill="([^"]+)"[^>]*\/>/);
+  // Check for theme colors (common in Word)
+  const themeColorMatch = runProperties.match(/<w:color w:themeColor="([^"]+)"(?:\s+w:themeTint="([^"]+)")?(?:\s+w:themeShade="([^"]+)")?[^>]*\/>/);  
+  if (themeColorMatch && !textColor) {
+    const themeColor = themeColorMatch[1];
+    const themeTint = themeColorMatch[2];
+    const themeShade = themeColorMatch[3];
+    
+    // Convert common theme colors to hex approximations
+    textColor = convertThemeColorToHex(themeColor, themeTint, themeShade);
+  }
   
+  // Handle auto color (usually black on white)
+  if (!textColor || textColor === 'auto') {
+    textColor = '000000'; // Assume black text
+  }
+  
+  // Extract highlight/background color - handle multiple formats
+  let backgroundColor = null;
+  
+  // Check for highlight colors
+  const highlightMatch = runProperties.match(/<w:highlight w:val="([^"]+)"\/>/); 
   if (highlightMatch) {
-    backgroundColor = highlightMatch[1];
-  } else if (shadingMatch) {
+    backgroundColor = convertHighlightColorToHex(highlightMatch[1]);
+  }
+  
+  // Check for shading/fill colors
+  const shadingMatch = runProperties.match(/<w:shd[^>]*w:fill="([^"]+)"[^>]*\/>/);  
+  if (shadingMatch && !backgroundColor) {
     backgroundColor = shadingMatch[1];
+  }
+  
+  // Check for theme background colors
+  const themeShadingMatch = runProperties.match(/<w:shd[^>]*w:themeFill="([^"]+)"(?:\s+w:themeFillTint="([^"]+)")?[^>]*\/>/);  
+  if (themeShadingMatch && !backgroundColor) {
+    backgroundColor = convertThemeColorToHex(themeShadingMatch[1], themeShadingMatch[2]);
+  }
+  
+  // Default to white background if not specified
+  if (!backgroundColor || backgroundColor === 'auto') {
+    backgroundColor = 'FFFFFF';
   }
   
   // Extract font size for contrast requirements
@@ -553,7 +586,7 @@ function analyzeRunColors(runXml, textContent) {
     fontSize = parseInt(sizeMatch[1]) / 2; // Word stores half-points
   }
   
-  // Only analyze if we have both text and background colors specified
+  // Analyze color contrast - we now have more comprehensive color detection  
   if (textColor && backgroundColor) {
     const contrastAnalysis = calculateColorContrast(textColor, backgroundColor, fontSize);
     
@@ -568,8 +601,8 @@ function analyzeRunColors(runXml, textContent) {
       });
     }
   }
-  // Check for problematic color combinations even without explicit background
-  else if (textColor) {
+  // Always check text color against white background since we default to white
+  else if (textColor && textColor !== '000000') { // Skip black text on white (good contrast)
     // Flag potentially problematic colors against assumed white background
     const contrastAnalysis = calculateColorContrast(textColor, 'FFFFFF', fontSize);
     
@@ -669,6 +702,97 @@ function getRelativeLuminance(rgb) {
   
   // Calculate luminance
   return 0.2126 * rLin + 0.7152 * gLin + 0.0722 * bLin;
+}
+
+// Convert Word theme colors to approximate hex values
+function convertThemeColorToHex(themeColor, tint, shade) {
+  const themeColors = {
+    'text1': '000000',     // Black
+    'text2': '1F497D',     // Dark blue
+    'background1': 'FFFFFF', // White  
+    'background2': 'EEECE1', // Light gray
+    'accent1': '4F81BD',   // Blue
+    'accent2': 'F79646',   // Orange
+    'accent3': '9BBB59',   // Green
+    'accent4': '8064A2',   // Purple
+    'accent5': '4BACC6',   // Light blue
+    'accent6': 'F24B4B',   // Red
+    'dark1': '000000',     // Black
+    'light1': 'FFFFFF',    // White
+    'dark2': '1F497D',     // Dark blue
+    'light2': 'EEECE1'    // Light gray
+  };
+  
+  let baseColor = themeColors[themeColor] || '000000';
+  
+  // Apply tint/shade modifications (simplified)
+  if (tint) {
+    // Tint makes color lighter (mix with white)
+    const tintValue = parseInt(tint, 16) / 255;
+    baseColor = applyTint(baseColor, tintValue);
+  }
+  
+  if (shade) {
+    // Shade makes color darker (mix with black)  
+    const shadeValue = parseInt(shade, 16) / 255;
+    baseColor = applyShade(baseColor, shadeValue);
+  }
+  
+  return baseColor;
+}
+
+// Convert Word highlight colors to hex values
+function convertHighlightColorToHex(highlightColor) {
+  const highlights = {
+    'yellow': 'FFFF00',
+    'brightGreen': '00FF00',
+    'turquoise': '00FFFF', 
+    'pink': 'FF00FF',
+    'blue': '0000FF',
+    'red': 'FF0000',
+    'darkBlue': '000080',
+    'darkRed': '800000',
+    'darkYellow': '808000',
+    'darkGreen': '008000',
+    'darkMagenta': '800080',
+    'darkCyan': '008080',
+    'gray25': 'C0C0C0',
+    'gray50': '808080',
+    'lightGray': 'D3D3D3',
+    'white': 'FFFFFF',
+    'black': '000000'
+  };
+  
+  return highlights[highlightColor] || 'FFFF00'; // Default to yellow
+}
+
+// Apply tint to a color (mix with white)
+function applyTint(hexColor, tintFactor) {
+  const rgb = hexToRgb(hexColor);
+  if (!rgb) return hexColor;
+  
+  const r = Math.round(rgb.r + (255 - rgb.r) * tintFactor);
+  const g = Math.round(rgb.g + (255 - rgb.g) * tintFactor);
+  const b = Math.round(rgb.b + (255 - rgb.b) * tintFactor);
+  
+  return rgbToHex(r, g, b);
+}
+
+// Apply shade to a color (mix with black)
+function applyShade(hexColor, shadeFactor) {
+  const rgb = hexToRgb(hexColor);
+  if (!rgb) return hexColor;
+  
+  const r = Math.round(rgb.r * (1 - shadeFactor));
+  const g = Math.round(rgb.g * (1 - shadeFactor));
+  const b = Math.round(rgb.b * (1 - shadeFactor));
+  
+  return rgbToHex(r, g, b);
+}
+
+// Convert RGB to hex
+function rgbToHex(r, g, b) {
+  return ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
 }
 
 // Generate specific recommendations based on contrast issue
