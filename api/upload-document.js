@@ -224,8 +224,8 @@ async function analyzeDocx(fileData, filename) {
         console.log('[analyzeDocx] Inline content positioning fixed (consolidated from', inlineContentResults.fixed, 'individual fixes), fix count now:', report.summary.fixed);
       }
       
-      // Check for color contrast issues
-      const colorContrastResults = analyzeColorContrast(documentXml);
+      // Check for color contrast issues with enhanced detection
+      const colorContrastResults = await analyzeColorContrast(documentXml, zip);\n      \n      // Add fallback detection if no color issues found\n      const fallbackResults = detectGrayTextFallback(documentXml);\n      const allColorIssues = [...colorContrastResults, ...fallbackResults];
       if (colorContrastResults.length > 0) {
         report.details.colorContrastNeedsFixing = true;
         report.details.colorContrastIssues = colorContrastResults;
@@ -444,13 +444,17 @@ async function analyzeShadowsAndFonts(zip) {
   return results;
 }
 
-// Analyze color contrast between text and background
-function analyzeColorContrast(documentXml) {
+// Analyze color contrast between text and background with enhanced detection
+async function analyzeColorContrast(documentXml, zip) {
   const results = [];
   
   if (!documentXml) {
     return results;
   }
+
+  // First, analyze styles.xml for color definitions
+  const styleColorIssues = await analyzeStyleColors(zip);
+  results.push(...styleColorIssues);
 
   let paragraphCount = 0;
   let currentHeading = null;
@@ -480,6 +484,10 @@ function analyzeColorContrast(documentXml) {
     if (!textContent || textContent.trim().length === 0) {
       return; // Skip empty paragraphs
     }
+
+    // Aggressive detection: Check for any potential gray formatting patterns
+    const aggressiveColorIssues = detectPotentialGrayFormatting(paragraph, textContent, paragraphCount, approximatePageNumber, currentHeading);
+    results.push(...aggressiveColorIssues);
 
     // Check for color specifications in runs within this paragraph
     const runMatches = paragraph.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) || [];
@@ -1693,4 +1701,64 @@ function analyzeHeadings(documentXml) {
   }
   
   return { emptyHeadings, orderIssues };
+}
+// Add this function to the end of api/upload-document.js
+
+// Fallback detection for gray text - aggressive approach to catch missed cases
+function detectGrayTextFallback(documentXml) {
+  const results = [];
+  
+  if (!documentXml) return results;
+  
+  console.log('[detectGrayTextFallback] Starting aggressive color detection...');
+  
+  // Look for ANY color-related formatting in the document
+  const colorPatterns = [
+    /<w:color[^>]*w:val="([^"]+)"[^>]*\/>/g,
+    /<w:color[^>]*w:themeColor="([^"]+)"[^>]*\/>/g,
+    /<w:highlight[^>]*w:val="([^"]+)"[^>]*\/>/g,
+    /<w:shd[^>]*w:fill="([^"]+)"[^>]*\/>/g
+  ];
+  
+  let foundAnyColorFormatting = false;
+  
+  colorPatterns.forEach((pattern, patternIndex) => {
+    const matches = documentXml.match(pattern);
+    if (matches) {
+      foundAnyColorFormatting = true;
+      console.log(`[detectGrayTextFallback] Pattern ${patternIndex} found ${matches.length} matches`);
+      
+      matches.forEach((match, matchIndex) => {
+        console.log(`[detectGrayTextFallback] Match ${matchIndex}:`, match);
+        
+        // Extract color value
+        const colorMatch = match.match(/(?:w:val|w:themeColor|w:fill)="([^"]+)"/);
+        if (colorMatch) {
+          const colorValue = colorMatch[1];
+          
+          // Flag any non-default color for manual review
+          if (colorValue !== '000000' && colorValue !== 'windowText' && colorValue.toLowerCase() !== 'black') {
+            console.log(`[detectGrayTextFallback] Flagging color: ${colorValue}`);
+            
+            results.push({
+              type: 'detected-color-formatting',
+              textColor: colorValue,
+              backgroundColor: 'FFFFFF (assumed white)',
+              contrastRatio: 'Manual verification required',
+              requiredRatio: 4.5,
+              fontSize: 12,
+              location: 'Document with color formatting',
+              approximatePage: 1,
+              context: 'Color formatting detected',
+              preview: `Color value: ${colorValue}`,
+              recommendation: `Color '${colorValue}' detected in document. Gray colors like 808080 (3.95:1), 999999 (2.85:1), CCCCCC (1.61:1) fail the 4.5:1 contrast requirement. Please verify this color meets accessibility standards.`
+            });
+          }
+        }
+      });
+    }
+  });
+  
+  console.log('[detectGrayTextFallback] Completed. Found', results.length, 'issues, foundAnyColorFormatting:', foundAnyColorFormatting);
+  return results;
 }
