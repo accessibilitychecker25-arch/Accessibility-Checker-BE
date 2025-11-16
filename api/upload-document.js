@@ -109,6 +109,9 @@ async function analyzeDocx(fileData, filename) {
       linkNamesNeedImprovement: false,
       formsDetected: false,
       flashingObjectsDetected: false,
+      inlineContentFixed: false,
+      inlineContentCount: 0,
+      inlineContentDetails: []
     }
   };
 
@@ -205,6 +208,18 @@ async function analyzeDocx(fileData, filename) {
         report.details.flashingObjectsDetected = true;
         report.details.flashingObjectLocations = flashingResults;
         report.summary.flagged += flashingResults.length;
+      }
+      
+      // Check for inline content positioning (images, objects, text boxes)
+      const inlineContentResults = await fixInlineContentPositioning(zip, documentXml);
+      if (inlineContentResults.fixed > 0) {
+        report.details.inlineContentFixed = true;
+        report.details.inlineContentCount = inlineContentResults.fixed;
+        report.details.inlineContentDetails = inlineContentResults.details;
+        report.details.inlineContentExplanation = "In-line content is necessary for users who rely on assistive technology and preferred by all users";
+        report.details.inlineContentCategory = "Text Wrapping and Positioning";
+        report.summary.fixed += 1; // Count as one consolidated fix
+        console.log('[analyzeDocx] Inline content positioning fixed (consolidated from', inlineContentResults.fixed, 'individual fixes), fix count now:', report.summary.fixed);
       }
     }
     
@@ -412,6 +427,179 @@ async function analyzeShadowsAndFonts(zip) {
           break;
         }
       }
+    }
+  }
+
+  return results;
+}
+
+// Fix inline content positioning for images, objects and text boxes
+async function fixInlineContentPositioning(zip, documentXml) {
+  const results = {
+    fixed: 0,
+    details: [],
+    explanation: "In-line content is necessary for users who rely on assistive technology and preferred by all users",
+    category: "Text Wrapping and Positioning"
+  };
+
+  if (!documentXml) {
+    return results;
+  }
+
+  let modifiedDocumentXml = documentXml;
+  let changesMade = false;
+
+  // Patterns to fix floating elements and positioning issues
+  const floatingPatterns = [
+    // DrawingML anchor patterns (modern Word drawings)
+    {
+      pattern: /<wp:anchor[^>]*>([\s\S]*?)<\/wp:anchor>/g,
+      replacement: function(match, content) {
+        // Convert anchor (floating) to inline
+        return `<wp:inline>${content}</wp:inline>`;
+      },
+      type: 'text-wrapping-anchor',
+      description: 'Converted floating anchor to inline'
+    },
+    // Text wrapping patterns
+    {
+      pattern: /<wp:wrapSquare[^>]*\/>/g,
+      replacement: '',
+      type: 'text-wrapping-square',
+      description: 'Removed square text wrapping'
+    },
+    {
+      pattern: /<wp:wrapTight[^>]*>[\s\S]*?<\/wp:wrapTight>/g,
+      replacement: '',
+      type: 'text-wrapping-tight',
+      description: 'Removed tight text wrapping'
+    },
+    {
+      pattern: /<wp:wrapThrough[^>]*>[\s\S]*?<\/wp:wrapThrough>/g,
+      replacement: '',
+      type: 'text-wrapping-through',
+      description: 'Removed through text wrapping'
+    },
+    {
+      pattern: /<wp:wrapTopAndBottom[^>]*\/>/g,
+      replacement: '',
+      type: 'text-wrapping-topbottom',
+      description: 'Removed top and bottom text wrapping'
+    },
+    {
+      pattern: /<wp:wrapNone[^>]*\/>/g,
+      replacement: '',
+      type: 'text-wrapping-none',
+      description: 'Removed no-wrap positioning'
+    },
+    // Position and alignment patterns
+    {
+      pattern: /<wp:positionH[^>]*>[\s\S]*?<\/wp:positionH>/g,
+      replacement: '',
+      type: 'position-horizontal',
+      description: 'Removed horizontal positioning'
+    },
+    {
+      pattern: /<wp:positionV[^>]*>[\s\S]*?<\/wp:positionV>/g,
+      replacement: '',
+      type: 'position-vertical',
+      description: 'Removed vertical positioning'
+    },
+    // VML patterns for legacy compatibility
+    {
+      pattern: /mso-position-horizontal:[^;]*;?/g,
+      replacement: '',
+      type: 'vml-horizontal-position',
+      description: 'Removed VML horizontal positioning'
+    },
+    {
+      pattern: /mso-position-vertical:[^;]*;?/g,
+      replacement: '',
+      type: 'vml-vertical-align',
+      description: 'Removed VML vertical positioning'
+    },
+    {
+      pattern: /mso-wrap-style:[^;]*;?/g,
+      replacement: '',
+      type: 'vml-wrap-style',
+      description: 'Removed VML wrap style'
+    },
+    // Remove left/top positioning from style attributes
+    {
+      pattern: /left:\s*[^;]*;?/g,
+      replacement: '',
+      type: 'vml-left-position',
+      description: 'Removed VML left positioning'
+    },
+    {
+      pattern: /top:\s*[^;]*;?/g,
+      replacement: '',
+      type: 'vml-top-position',
+      description: 'Removed VML top positioning'
+    }
+  ];
+
+  // Apply fixes for floating elements
+  floatingPatterns.forEach(patternObj => {
+    const { pattern, replacement, type, description } = patternObj;
+    const matches = modifiedDocumentXml.match(pattern);
+    
+    if (matches) {
+      matches.forEach(match => {
+        const newContent = typeof replacement === 'function' ? replacement(match) : replacement;
+        modifiedDocumentXml = modifiedDocumentXml.replace(match, newContent);
+        results.fixed++;
+        changesMade = true;
+        
+        results.details.push({
+          type: type,
+          description: description,
+          location: 'Document content',
+          originalContent: match.substring(0, 100) + (match.length > 100 ? '...' : '')
+        });
+        
+        console.log(`[fixInlineContentPositioning] Fixed ${type}: ${description}`);
+      });
+    }
+  });
+
+  // Special handling for drawing elements - ensure they are inline
+  const drawingPattern = /<w:drawing[^>]*>[\s\S]*?<\/w:drawing>/g;
+  const drawingMatches = modifiedDocumentXml.match(drawingPattern);
+  
+  if (drawingMatches) {
+    drawingMatches.forEach(drawing => {
+      // Check if this drawing contains floating elements
+      if (drawing.includes('wp:anchor') && !drawing.includes('wp:inline')) {
+        // Convert anchor to inline within the drawing
+        let fixedDrawing = drawing.replace(/<wp:anchor[^>]*>/g, '<wp:inline>');
+        fixedDrawing = fixedDrawing.replace(/<\/wp:anchor>/g, '</wp:inline>');
+        
+        if (fixedDrawing !== drawing) {
+          modifiedDocumentXml = modifiedDocumentXml.replace(drawing, fixedDrawing);
+          results.fixed++;
+          changesMade = true;
+          
+          results.details.push({
+            type: 'drawing-anchor-conversion',
+            description: 'Converted floating drawing to inline',
+            location: 'Document content',
+            originalContent: drawing.substring(0, 100) + '...'
+          });
+          
+          console.log('[fixInlineContentPositioning] Fixed drawing: Converted floating to inline');
+        }
+      }
+    });
+  }
+
+  // Update the document XML in the zip if changes were made
+  if (changesMade) {
+    try {
+      zip.file('word/document.xml', modifiedDocumentXml);
+      console.log(`[fixInlineContentPositioning] Updated document.xml with ${results.fixed} inline content fixes`);
+    } catch (error) {
+      console.error('[fixInlineContentPositioning] Error updating document:', error);
     }
   }
 

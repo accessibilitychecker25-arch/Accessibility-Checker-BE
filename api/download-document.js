@@ -99,7 +99,8 @@ async function remediateDocx(fileData, filename) {
     if (docFile) {
       const origDocXml = await docFile.async('string');
       const afterShadows = removeShadowsOnly(origDocXml);
-      writeIfChanged('word/document.xml', origDocXml, afterShadows);
+      const afterInlineContent = applyInlineContentFixes(afterShadows || origDocXml);
+      writeIfChanged('word/document.xml', origDocXml, afterInlineContent);
     }
     
     // Process styles.xml
@@ -157,6 +158,110 @@ async function remediateDocx(fileData, filename) {
 }
 
 
+
+function applyInlineContentFixes(xmlContent) {
+  if (!xmlContent) return null;
+  
+  const original = xmlContent;
+  let fixedXml = xmlContent;
+
+  // Apply the same patterns as in the analysis function
+  const floatingPatterns = [
+    // DrawingML anchor patterns (modern Word drawings)
+    {
+      pattern: /<wp:anchor[^>]*>([\s\S]*?)<\/wp:anchor>/g,
+      replacement: function(match, content) {
+        // Convert anchor (floating) to inline
+        return `<wp:inline>${content}</wp:inline>`;
+      }
+    },
+    // Text wrapping patterns
+    {
+      pattern: /<wp:wrapSquare[^>]*\/>/g,
+      replacement: ''
+    },
+    {
+      pattern: /<wp:wrapTight[^>]*>[\s\S]*?<\/wp:wrapTight>/g,
+      replacement: ''
+    },
+    {
+      pattern: /<wp:wrapThrough[^>]*>[\s\S]*?<\/wp:wrapThrough>/g,
+      replacement: ''
+    },
+    {
+      pattern: /<wp:wrapTopAndBottom[^>]*\/>/g,
+      replacement: ''
+    },
+    {
+      pattern: /<wp:wrapNone[^>]*\/>/g,
+      replacement: ''
+    },
+    // Position and alignment patterns
+    {
+      pattern: /<wp:positionH[^>]*>[\s\S]*?<\/wp:positionH>/g,
+      replacement: ''
+    },
+    {
+      pattern: /<wp:positionV[^>]*>[\s\S]*?<\/wp:positionV>/g,
+      replacement: ''
+    },
+    // VML patterns for legacy compatibility
+    {
+      pattern: /mso-position-horizontal:[^;]*;?/g,
+      replacement: ''
+    },
+    {
+      pattern: /mso-position-vertical:[^;]*;?/g,
+      replacement: ''
+    },
+    {
+      pattern: /mso-wrap-style:[^;]*;?/g,
+      replacement: ''
+    },
+    {
+      pattern: /left:\s*[^;]*;?/g,
+      replacement: ''
+    },
+    {
+      pattern: /top:\s*[^;]*;?/g,
+      replacement: ''
+    }
+  ];
+
+  // Apply fixes for floating elements
+  floatingPatterns.forEach(patternObj => {
+    const { pattern, replacement } = patternObj;
+    
+    if (typeof replacement === 'function') {
+      fixedXml = fixedXml.replace(pattern, replacement);
+    } else {
+      fixedXml = fixedXml.replace(pattern, replacement);
+    }
+  });
+
+  // Special handling for drawing elements - ensure they are inline
+  const drawingPattern = /<w:drawing[^>]*>[\s\S]*?<\/w:drawing>/g;
+  const drawingMatches = fixedXml.match(drawingPattern);
+  
+  if (drawingMatches) {
+    drawingMatches.forEach(drawing => {
+      // Check if this drawing contains floating elements
+      if (drawing.includes('wp:anchor') && !drawing.includes('wp:inline')) {
+        // Convert anchor to inline within the drawing
+        let fixedDrawing = drawing.replace(/<wp:anchor[^>]*>/g, '<wp:inline>');
+        fixedDrawing = fixedDrawing.replace(/<\/wp:anchor>/g, '</wp:inline>');
+        
+        if (fixedDrawing !== drawing) {
+          fixedXml = fixedXml.replace(drawing, fixedDrawing);
+        }
+      }
+    });
+  }
+
+  // If nothing changed, return null
+  if (fixedXml === original) return null;
+  return fixedXml;
+}
 
 function removeShadowsOnly(xmlContent) {
   const original = xmlContent;
