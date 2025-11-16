@@ -111,7 +111,9 @@ async function analyzeDocx(fileData, filename) {
       flashingObjectsDetected: false,
       inlineContentFixed: false,
       inlineContentCount: 0,
-      inlineContentDetails: []
+      inlineContentDetails: [],
+      colorContrastNeedsFixing: false,
+      colorContrastIssues: []
     }
   };
 
@@ -220,6 +222,15 @@ async function analyzeDocx(fileData, filename) {
         report.details.inlineContentCategory = "Text Wrapping and Positioning";
         report.summary.fixed += 1; // Count as one consolidated fix
         console.log('[analyzeDocx] Inline content positioning fixed (consolidated from', inlineContentResults.fixed, 'individual fixes), fix count now:', report.summary.fixed);
+      }
+      
+      // Check for color contrast issues
+      const colorContrastResults = analyzeColorContrast(documentXml);
+      if (colorContrastResults.length > 0) {
+        report.details.colorContrastNeedsFixing = true;
+        report.details.colorContrastIssues = colorContrastResults;
+        report.summary.flagged += colorContrastResults.length;
+        console.log('[analyzeDocx] Color contrast issues detected:', colorContrastResults.length, 'flagged count now:', report.summary.flagged);
       }
     }
     
@@ -431,6 +442,255 @@ async function analyzeShadowsAndFonts(zip) {
   }
 
   return results;
+}
+
+// Analyze color contrast between text and background
+function analyzeColorContrast(documentXml) {
+  const results = [];
+  
+  if (!documentXml) {
+    return results;
+  }
+
+  let paragraphCount = 0;
+  let currentHeading = null;
+  let approximatePageNumber = 1;
+
+  // Split into paragraphs for analysis
+  const paragraphRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  const paragraphs = documentXml.match(paragraphRegex) || [];
+
+  paragraphs.forEach((paragraph, index) => {
+    paragraphCount++;
+    
+    // Check for page breaks
+    if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
+      approximatePageNumber++;
+    }
+    
+    // Track headings
+    const headingMatch = paragraph.match(/<w:pStyle w:val="(Heading\d+)"\/>/); 
+    if (headingMatch) {
+      const headingText = extractTextFromParagraph(paragraph);
+      currentHeading = `${headingMatch[1]}: ${headingText.substring(0, 50)}${headingText.length > 50 ? '...' : ''}`;
+    }
+
+    // Extract text content to check if this paragraph has meaningful text
+    const textContent = extractTextFromParagraph(paragraph);
+    if (!textContent || textContent.trim().length === 0) {
+      return; // Skip empty paragraphs
+    }
+
+    // Check for color specifications in runs within this paragraph
+    const runMatches = paragraph.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g) || [];
+    
+    runMatches.forEach(run => {
+      const runText = extractTextFromParagraph(run);
+      if (!runText || runText.trim().length === 0) {
+        return; // Skip runs without text
+      }
+
+      // Look for color properties in run properties
+      const colorIssues = analyzeRunColors(run, runText);
+      
+      if (colorIssues.length > 0) {
+        colorIssues.forEach(issue => {
+          results.push({
+            type: issue.type,
+            textColor: issue.textColor,
+            backgroundColor: issue.backgroundColor,
+            contrastRatio: issue.contrastRatio,
+            requiredRatio: issue.requiredRatio,
+            fontSize: issue.fontSize,
+            location: `Paragraph ${paragraphCount}`,
+            approximatePage: approximatePageNumber,
+            context: currentHeading || 'Document body',
+            preview: runText.substring(0, 100),
+            recommendation: generateContrastRecommendation(issue)
+          });
+        });
+      }
+    });
+  });
+
+  return results;
+}
+
+// Analyze colors within a single text run
+function analyzeRunColors(runXml, textContent) {
+  const issues = [];
+  
+  // Extract run properties
+  const rPrMatch = runXml.match(/<w:rPr[^>]*>([\s\S]*?)<\/w:rPr>/);
+  if (!rPrMatch) {
+    return issues; // No run properties, assume default colors
+  }
+  
+  const runProperties = rPrMatch[1];
+  
+  // Extract text color
+  let textColor = null;
+  const colorMatch = runProperties.match(/<w:color w:val="([^"]+)"\/>/); 
+  if (colorMatch) {
+    textColor = colorMatch[1];
+  }
+  
+  // Extract highlight/background color
+  let backgroundColor = null;
+  const highlightMatch = runProperties.match(/<w:highlight w:val="([^"]+)"\/>/); 
+  const shadingMatch = runProperties.match(/<w:shd[^>]*w:fill="([^"]+)"[^>]*\/>/);
+  
+  if (highlightMatch) {
+    backgroundColor = highlightMatch[1];
+  } else if (shadingMatch) {
+    backgroundColor = shadingMatch[1];
+  }
+  
+  // Extract font size for contrast requirements
+  let fontSize = 12; // Default assumption
+  const sizeMatch = runProperties.match(/<w:sz w:val="(\d+)"\/>/); 
+  if (sizeMatch) {
+    fontSize = parseInt(sizeMatch[1]) / 2; // Word stores half-points
+  }
+  
+  // Only analyze if we have both text and background colors specified
+  if (textColor && backgroundColor) {
+    const contrastAnalysis = calculateColorContrast(textColor, backgroundColor, fontSize);
+    
+    if (!contrastAnalysis.meetsRequirements) {
+      issues.push({
+        type: contrastAnalysis.type,
+        textColor: textColor,
+        backgroundColor: backgroundColor,
+        contrastRatio: contrastAnalysis.ratio,
+        requiredRatio: contrastAnalysis.requiredRatio,
+        fontSize: fontSize
+      });
+    }
+  }
+  // Check for problematic color combinations even without explicit background
+  else if (textColor) {
+    // Flag potentially problematic colors against assumed white background
+    const contrastAnalysis = calculateColorContrast(textColor, 'FFFFFF', fontSize);
+    
+    if (!contrastAnalysis.meetsRequirements) {
+      issues.push({
+        type: 'insufficient-contrast-assumed-background',
+        textColor: textColor,
+        backgroundColor: 'FFFFFF (assumed)',
+        contrastRatio: contrastAnalysis.ratio,
+        requiredRatio: contrastAnalysis.requiredRatio,
+        fontSize: fontSize
+      });
+    }
+  }
+  
+  return issues;
+}
+
+// Calculate color contrast ratio and check requirements
+function calculateColorContrast(textColorHex, backgroundColorHex, fontSize) {
+  // Remove # if present and ensure 6 digits
+  textColorHex = textColorHex.replace('#', '').toUpperCase();
+  backgroundColorHex = backgroundColorHex.replace('#', '').toUpperCase();
+  
+  if (textColorHex.length === 3) {
+    textColorHex = textColorHex.split('').map(c => c + c).join('');
+  }
+  if (backgroundColorHex.length === 3) {
+    backgroundColorHex = backgroundColorHex.split('').map(c => c + c).join('');
+  }
+  
+  // Convert hex to RGB
+  const textRgb = hexToRgb(textColorHex);
+  const backgroundRgb = hexToRgb(backgroundColorHex);
+  
+  if (!textRgb || !backgroundRgb) {
+    return {
+      ratio: 0,
+      meetsRequirements: false,
+      requiredRatio: 4.5,
+      type: 'invalid-color'
+    };
+  }
+  
+  // Calculate relative luminance
+  const textLuminance = getRelativeLuminance(textRgb);
+  const backgroundLuminance = getRelativeLuminance(backgroundRgb);
+  
+  // Calculate contrast ratio
+  const lighter = Math.max(textLuminance, backgroundLuminance);
+  const darker = Math.min(textLuminance, backgroundLuminance);
+  const contrastRatio = (lighter + 0.05) / (darker + 0.05);
+  
+  // Determine requirements based on font size
+  let requiredRatio = 4.5; // Default for normal text
+  let type = 'insufficient-contrast-normal';
+  
+  if (fontSize >= 18 || (fontSize >= 14 && /* assume bold for larger fonts */ true)) {
+    requiredRatio = 3.0; // Large text requirements
+    type = 'insufficient-contrast-large';
+  }
+  
+  return {
+    ratio: Math.round(contrastRatio * 100) / 100,
+    meetsRequirements: contrastRatio >= requiredRatio,
+    requiredRatio: requiredRatio,
+    type: contrastRatio >= requiredRatio ? 'sufficient-contrast' : type
+  };
+}
+
+// Convert hex color to RGB
+function hexToRgb(hex) {
+  if (hex.length !== 6) return null;
+  
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+  
+  return { r, g, b };
+}
+
+// Calculate relative luminance according to WCAG guidelines
+function getRelativeLuminance(rgb) {
+  const { r, g, b } = rgb;
+  
+  // Convert to 0-1 range
+  const rs = r / 255;
+  const gs = g / 255;
+  const bs = b / 255;
+  
+  // Apply gamma correction
+  const rLin = rs <= 0.03928 ? rs / 12.92 : Math.pow((rs + 0.055) / 1.055, 2.4);
+  const gLin = gs <= 0.03928 ? gs / 12.92 : Math.pow((gs + 0.055) / 1.055, 2.4);
+  const bLin = bs <= 0.03928 ? bs / 12.92 : Math.pow((bs + 0.055) / 1.055, 2.4);
+  
+  // Calculate luminance
+  return 0.2126 * rLin + 0.7152 * gLin + 0.0722 * bLin;
+}
+
+// Generate specific recommendations based on contrast issue
+function generateContrastRecommendation(issue) {
+  const { type, contrastRatio, requiredRatio, fontSize } = issue;
+  
+  switch (type) {
+    case 'insufficient-contrast-normal':
+      return `Increase contrast to at least ${requiredRatio}:1 for ${fontSize}pt text. Current ratio: ${contrastRatio}:1. Consider darker text or lighter background.`;
+    
+    case 'insufficient-contrast-large':
+      return `Increase contrast to at least ${requiredRatio}:1 for large text (${fontSize}pt). Current ratio: ${contrastRatio}:1.`;
+    
+    case 'insufficient-contrast-assumed-background':
+      return `Verify contrast against actual background. Against white background: ${contrastRatio}:1 (needs ${requiredRatio}:1). Consider specifying background color.`;
+    
+    case 'invalid-color':
+      return 'Invalid color specification detected. Use valid hex colors for proper contrast calculation.';
+    
+    default:
+      return `Improve color contrast to meet WCAG guidelines. Required: ${requiredRatio}:1, Current: ${contrastRatio}:1.`;
+  }
 }
 
 // Fix inline content positioning for images, objects and text boxes
