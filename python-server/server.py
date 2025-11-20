@@ -466,14 +466,22 @@ def detect_contrast(doc: Document, report: Dict[str, Any]):
             if ratio < required:
                 issues.append({
                     "paragraphIndex": idx,
+                    "location": f"Paragraph {idx + 1}",
                     "color": hexcolor,
                     "sizePt": size_pt,
                     "bold": bold,
                     "ratio": round(ratio, 2),
-                    "sample": r.text[:60],
+                    "required": required,
+                    "sample": r.text[:60] if r.text else "[No text]",
                 })
+    
     report["details"]["colorContrastIssues"] = issues
-    report["summary"]["flagged"] += len(issues)
+    
+    # Add color contrast as a flagged issue if problems found
+    if issues:
+        report["details"]["colorContrastNeedsFixing"] = True
+        report["details"]["colorContrastLocations"] = issues
+        report["summary"]["flagged"] += 1  # Count as 1 flagged issue type, not per issue
 
 def file_name_has_underscores(name: str) -> bool:
     """

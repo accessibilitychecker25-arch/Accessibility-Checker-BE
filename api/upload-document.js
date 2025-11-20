@@ -272,26 +272,16 @@ async function analyzeDocx(fileData, filename) {
       report.summary.flagged += 1;
       console.log('[analyzeDocx] insufficient line spacing detected, flagged count now:', report.summary.flagged);
     }
+    // Color contrast issues detection
     if (shadowFontResults.lowContrastIssues.length > 0) {
       report.details.colorContrastNeedsFixing = true;
       report.details.colorContrastLocations = shadowFontResults.lowContrastIssues;
-      report.summary.flagged += 1;
+      report.details.colorContrastIssues = shadowFontResults.lowContrastIssues; // Keep for consistency with Python
+      report.summary.flagged += 1; // Count as 1 flagged issue type
       console.log(
-        '[analyzeDocx] low-contrast text detected, count:',
-        shadowFontResults.lowContrastIssues.length
+        '[analyzeDocx] Color contrast issues detected:',
+        shadowFontResults.lowContrastIssues.length, 'locations'
       );
-    }
-    
-    // New: Color contrast issue
-  console.log('[DEBUG shadowFontResults]', JSON.stringify(shadowFontResults, null, 2));
-    if (
-     shadowFontResults.lowContrastText &&
-     shadowFontResults.lowContrastText.length > 0
-     ) {
-     report.details.colorContrastNeedsFixing = true;
-     report.details.colorContrastLocations =
-    shadowFontResults.lowContrastText;
-    report.summary.flagged += 1;
     console.log(
     '[analyzeDocx] low-contrast text detected, flagged count now:',
     report.summary.flagged
