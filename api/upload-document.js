@@ -86,7 +86,7 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
+module.exports.analyzeDocx = analyzeDocx;
 async function analyzeDocx(fileData, filename) {
   const report = {
     fileName: filename,
@@ -111,7 +111,9 @@ async function analyzeDocx(fileData, filename) {
       flashingObjectsDetected: false,
       inlineContentFixed: false,
       inlineContentCount: 0,
-      inlineContentDetails: []
+      inlineContentDetails: [],
+      colorContrastNeedsFixing: false,
+      colorContrastLocations: [],
     }
   };
 
@@ -270,7 +272,32 @@ async function analyzeDocx(fileData, filename) {
       report.summary.flagged += 1;
       console.log('[analyzeDocx] insufficient line spacing detected, flagged count now:', report.summary.flagged);
     }
+    if (shadowFontResults.lowContrastIssues.length > 0) {
+      report.details.colorContrastNeedsFixing = true;
+      report.details.colorContrastLocations = shadowFontResults.lowContrastIssues;
+      report.summary.flagged += 1;
+      console.log(
+        '[analyzeDocx] low-contrast text detected, count:',
+        shadowFontResults.lowContrastIssues.length
+      );
+    }
     
+    // New: Color contrast issue
+  console.log('[DEBUG shadowFontResults]', JSON.stringify(shadowFontResults, null, 2));
+    if (
+     shadowFontResults.lowContrastText &&
+     shadowFontResults.lowContrastText.length > 0
+     ) {
+     report.details.colorContrastNeedsFixing = true;
+     report.details.colorContrastLocations =
+    shadowFontResults.lowContrastText;
+    report.summary.flagged += 1;
+    console.log(
+    '[analyzeDocx] low-contrast text detected, flagged count now:',
+    report.summary.flagged
+  );
+}
+
     console.log('[analyzeDocx] FINAL fix count before return:', report.summary.fixed);
     
     // Scan for any remaining suspicious protection/encryption markers to help debug Protected View
@@ -316,7 +343,12 @@ async function analyzeShadowsAndFonts(zip) {
     hasShadows: false,
     hasSerifFonts: false,
     hasSmallFonts: false,
-    hasInsufficientLineSpacing: false
+    hasInsufficientLineSpacing: false,
+    shadowParts: [],
+    fontIssueLocations: [],
+    lineSpacingIssueLocations: [],
+    lowContrastText: [] ,
+    lowContrastIssues: [] 
   };
 
   // Track detailed locations of issues
@@ -348,7 +380,8 @@ async function analyzeShadowsAndFonts(zip) {
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (documentXml) {
     const locationResults = analyzeDocumentLocations(documentXml);
-    
+    results.lowContrastIssues = locationResults.lowContrastIssues || [];
+
     // Merge results with location details
     if (locationResults.shadows.length > 0) {
       results.hasShadows = true;
@@ -610,12 +643,49 @@ async function fixInlineContentPositioning(zip, documentXml) {
   return results;
 }
 
+// === Color contrast helpers (WCAG AA, white background) ===
+
+// “#RRGGBB” or “RRGGBB” -> { red, green, blue }
+function hexToRgb(hex) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) {
+    // 3-digit abbreviation changed to 6 digits
+    h = h.split('').map(c => c + c).join('');
+  }
+  const num = parseInt(h, 16);
+  return {
+    r: (num >> 16) & 0xff,
+    g: (num >> 8) & 0xff,
+    b: num & 0xff
+  };
+}
+
+// Relative brightness in WCAG
+function relativeLuminance({ r, g, b }) {
+  const srgb = [r, g, b].map(v => v / 255);
+  const mapped = srgb.map(v =>
+    v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  );
+  return 0.2126 * mapped[0] + 0.7152 * mapped[1] + 0.0722 * mapped[2];
+}
+
+// Foreground Color vs. Background Color Contrast
+function contrastRatio(fgHex, bgHex) {
+  const fg = relativeLuminance(hexToRgb(fgHex));
+  const bg = relativeLuminance(hexToRgb(bgHex));
+  const L1 = Math.max(fg, bg);
+  const L2 = Math.min(fg, bg);
+  return (L1 + 0.05) / (L2 + 0.05);
+}
+
+
 // Analyze document structure and find specific locations of accessibility issues
 function analyzeDocumentLocations(documentXml) {
   const results = {
     shadows: [],
     fontIssues: [],
-    lineSpacingIssues: []
+    lineSpacingIssues: [],
+    lowContrastIssues: []  
   };
 
   let paragraphCount = 0;
@@ -628,7 +698,9 @@ function analyzeDocumentLocations(documentXml) {
 
   paragraphs.forEach((paragraph, index) => {
     paragraphCount++;
-    
+    if (paragraphCount === 1) {
+      console.log('[DEBUG paragraph 1]', paragraph.substring(0, 500));
+    }
     // Check for page breaks to estimate page numbers
     if (paragraph.includes('<w:br w:type="page"/>') || paragraph.includes('<w:lastRenderedPageBreak/>')) {
       approximatePageNumber++;
@@ -689,6 +761,34 @@ function analyzeDocumentLocations(documentXml) {
         }
       }
     }
+
+    // === New: check color contrast in each run ===
+const runRegex = /<w:r\b[\s\S]*?<\/w:r>/g;
+const runs = paragraph.match(runRegex) || [];
+
+runs.forEach(runXml => {
+  // Find the text color in this run: <w:color w:val=“XXXXXX”>
+  const colorMatch = runXml.match(/<w:color[^>]*w:val="([0-9A-Fa-f]{3,6})"/);
+  if (!colorMatch) return;
+
+  const textColorHex = colorMatch[1];
+
+  // Compared to a white background #FFFFFF
+  const ratio = contrastRatio(textColorHex, 'FFFFFF');
+
+  //WCAG AA Text Font Contrast Ratio: 4.5:1
+  if (ratio < 4.5) {
+    results.lowContrastIssues.push({
+      color: `#${textColorHex}`,
+      contrastRatio: Number(ratio.toFixed(2)),
+      location: `Paragraph ${paragraphCount}`,
+      approximatePage: approximatePageNumber,
+      context: currentHeading || 'Document body',
+      preview: extractTextFromParagraph(paragraph).substring(0, 100)
+    });
+  }
+});
+
 
     // Check for line spacing issues
     const spacingMatch = paragraph.match(/<w:spacing[^>]*w:line="(\d+)"[^>]*\/>/);
